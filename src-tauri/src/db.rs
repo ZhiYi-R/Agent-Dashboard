@@ -536,8 +536,15 @@ impl UsageDb {
 
     fn group_by_model(&self, filter: &RecordFilter) -> Result<HashMap<String, ModelSummary>> {
         let (where_sql, params) = build_filter_sql(filter);
+        // Aggregate by model only. Grouping by (model, provider) and then keying the
+        // HashMap by model alone used to drop all but one provider slice — e.g.
+        // grok-4.5/zai (5 rows) overwrote grok-4.5/opencode-go (263 rows).
         let sql = format!(
-            "SELECT model, provider,
+            "SELECT model,
+                    CASE
+                      WHEN COUNT(DISTINCT provider) = 1 THEN MIN(provider)
+                      ELSE NULL
+                    END,
                     COALESCE(SUM(input_tokens), 0),
                     COALESCE(SUM(output_tokens), 0),
                     COALESCE(SUM(cache_read_tokens), 0),
@@ -546,7 +553,7 @@ impl UsageDb {
                     COALESCE(SUM(cost_usd), 0),
                     COUNT(*)
              FROM records {where_sql}
-             GROUP BY model, provider"
+             GROUP BY model"
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
