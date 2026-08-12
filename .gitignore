@@ -1,0 +1,55 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Agent / AI tooling (not product code)
+AGENTS.md
+**/AGENTS.md
+.agents/
+.agent/
+.claude/
+.cursor/
+.codex/
+.kimi/
+.gemini/
+.windsurf/
+.continue/
+.aider*
+CLAUDE.md
+GEMINI.md
+.cursorrules
+.cursorignore
+**/SKILL.md
+**/skills/
+.skills/
+
+# Temp / local probes
+_tmp*
+*.tmp
+.cache/

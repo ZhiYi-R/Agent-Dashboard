@@ -1,0 +1,178 @@
+use crate::models::{AgentSettings, AppSettings, UsageRecord};
+use crate::pricing::PriceCache;
+use anyhow::Result;
+
+pub mod claude;
+pub mod codex;
+pub mod devin;
+pub mod devin_desktop;
+pub mod kimi;
+pub mod opencode;
+pub mod zcode;
+pub mod zed;
+
+/// Whether a source file should be scanned (and how).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileScanPlan {
+    /// Unchanged since last scan — skip entirely.
+    Skip,
+    /// Read only bytes after last_offset (append-only jsonl).
+    Tail { offset: u64 },
+    /// Re-parse the whole file (and caller should delete old rows for this source).
+    Full,
+}
+
+/// Callback used by collectors to ask the scan engine about a file.
+/// Returns how to process it. Collectors that only have a single DB path
+/// can ignore this and always emit records (engine still upserts by id).
+pub type FilePlanner<'a> = dyn FnMut(&str, u64, u64) -> FileScanPlan + 'a;
+
+pub trait Collector: Send + Sync {
+    fn id(&self) -> &'static str;
+    fn name(&self) -> &'static str;
+    fn default_path(&self) -> Option<String>;
+    fn collect(
+        &self,
+        settings: &AppSettings,
+        prices: &PriceCache,
+        sink: &mut dyn FnMut(UsageRecord) -> Result<()>,
+        planner: &mut FilePlanner<'_>,
+    ) -> Result<()>;
+    fn agent_settings<'a>(&self, settings: &'a AppSettings) -> crate::models::AgentSettings {
+        settings.agent(self.id())
+    }
+}
+
+/// Ask the planner whether `path` needs scanning (no file open).
+/// Returns `true` if the file should be processed (Full/Tail), `false` if Skip.
+pub fn should_scan_source(path: &std::path::Path, planner: &mut FilePlanner<'_>) -> Result<bool> {
+    let meta = std::fs::metadata(path)?;
+    let mtime_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let size = meta.len();
+    let source = path.to_string_lossy().into_owned();
+    Ok(!matches!(
+        planner(&source, mtime_ms, size),
+        FileScanPlan::Skip
+    ))
+}
+
+/// Helper for jsonl collectors: open file according to plan.
+pub fn plan_and_open_jsonl(
+    path: &std::path::Path,
+    planner: &mut FilePlanner<'_>,
+) -> Result<Option<(std::fs::File, u64, u64, u64, bool)>> {
+    use std::io::{Seek, SeekFrom};
+
+    let meta = std::fs::metadata(path)?;
+    let mtime_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let size = meta.len();
+    let source = path.to_string_lossy().into_owned();
+    let plan = planner(&source, mtime_ms, size);
+    match plan {
+        FileScanPlan::Skip => Ok(None),
+        FileScanPlan::Full => {
+            let f = std::fs::File::open(path)?;
+            Ok(Some((f, mtime_ms, size, 0, true)))
+        }
+        FileScanPlan::Tail { offset } => {
+            let mut f = std::fs::File::open(path)?;
+            if offset > 0 && offset <= size {
+                f.seek(SeekFrom::Start(offset))?;
+                Ok(Some((f, mtime_ms, size, offset, false)))
+            } else {
+                // offset invalid / truncated → full
+                Ok(Some((f, mtime_ms, size, 0, true)))
+            }
+        }
+    }
+}
+
+pub fn all_collectors() -> Vec<Box<dyn Collector>> {
+    vec![
+        Box::new(claude::ClaudeCollector),
+        Box::new(codex::CodexCollector),
+        Box::new(zcode::ZCodeCollector),
+        Box::new(opencode::OpenCodeCollector),
+        Box::new(kimi::KimiCollector),
+        Box::new(devin::DevinCollector),
+        Box::new(devin_desktop::DevinDesktopCollector),
+        Box::new(zed::ZedCollector),
+    ]
+}
+
+pub fn resolve_path(settings: &AgentSettings, default: Option<&str>) -> Option<String> {
+    let raw = settings
+        .path
+        .clone()
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| default.map(|s| s.to_string()))?;
+    Some(expand_path(&raw).unwrap_or(raw))
+}
+
+pub fn home_dir() -> Option<std::path::PathBuf> {
+    dirs::home_dir().or_else(|| {
+        std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .map(std::path::PathBuf::from)
+            .ok()
+    })
+}
+
+pub fn expand_path(path: &str) -> Option<String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return None;
+    }
+
+    // Expand leading environment variables like %LOCALAPPDATA%\... or %LOCALAPPDATA%/...
+    let first = path
+        .split("\\")
+        .next()
+        .or_else(|| path.split('/').next())?;
+    if first.starts_with('%') && first.ends_with('%') && first.len() > 2 {
+        let var = &first[1..first.len() - 1];
+        if let Ok(val) = std::env::var(var) {
+            if !val.is_empty() {
+                let rest = path.strip_prefix(first)?;
+                let rest = rest.strip_prefix("\\").or_else(|| rest.strip_prefix('/')).unwrap_or(rest);
+                return Some(std::path::Path::new(&val).join(rest).to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    // Expand ~/ or ~\ to home directory
+    if path.starts_with("~/") || path.starts_with("~\\") {
+        let rest = &path[2..];
+        return home_dir().map(|h| h.join(rest).to_string_lossy().into_owned());
+    }
+
+    Some(path.to_string())
+}
+
+pub fn normalize_model(model: &str) -> String {
+    let t = model.trim();
+    if t.is_empty() {
+        "<unknown>".to_string()
+    } else {
+        t.to_string()
+    }
+}
+
+/// Ensure non-empty model label before insert.
+pub fn ensure_model(model: String) -> String {
+    if model.trim().is_empty() {
+        "<unknown>".to_string()
+    } else {
+        model
+    }
+}

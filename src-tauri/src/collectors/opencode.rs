@@ -1,0 +1,118 @@
+use super::{ensure_model, should_scan_source, Collector, FilePlanner, resolve_path};
+use crate::models::{AppSettings, UsageRecord};
+use crate::pricing::PriceCache;
+use anyhow::Context;
+use chrono::{TimeZone, Utc};
+use rusqlite::OpenFlags;
+use serde_json::Value;
+
+pub struct OpenCodeCollector;
+
+impl Collector for OpenCodeCollector {
+    fn id(&self) -> &'static str {
+        "opencode"
+    }
+    fn name(&self) -> &'static str {
+        "OpenCode"
+    }
+    fn default_path(&self) -> Option<String> {
+        Some("~/.local/share/opencode/opencode.db".to_string())
+    }
+
+    fn collect(
+        &self,
+        settings: &AppSettings,
+        prices: &PriceCache,
+        sink: &mut dyn FnMut(UsageRecord) -> anyhow::Result<()>,
+        planner: &mut FilePlanner<'_>,
+    ) -> anyhow::Result<()> {
+        let path = resolve_path(&settings.agent(self.id()), self.default_path().as_deref())
+            .context("OpenCode db path not configured and default not found")?;
+        if !std::path::Path::new(&path).exists() {
+            return Ok(());
+        }
+        if !should_scan_source(std::path::Path::new(&path), planner)? {
+            return Ok(());
+        }
+
+        let conn = rusqlite::Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+
+        // Try the v2 session table with pre-aggregated token columns
+        if conn
+            .prepare("SELECT id, directory, title, model, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, time_created, time_updated FROM session")
+            .is_ok()
+        {
+            let mut stmt = conn.prepare(
+                "SELECT id, directory, title, model, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, time_created, time_updated FROM session",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
+                    row.get::<_, i64>(10)?,
+                ))
+            })?;
+
+            for row in rows {
+                let (id, directory, _title, model_json, input, output, reasoning, cache_read, cache_write, _created, updated) =
+                    row?;
+
+                let (model, provider) = parse_model_json(model_json.as_deref());
+                let ts = Utc.timestamp_millis_opt(updated).single().unwrap_or_else(Utc::now);
+
+                let mut rec = UsageRecord {
+                    id: format!("opencode:{}", id),
+                    agent: "opencode".to_string(),
+                    session_id: id,
+                    project: directory,
+                    model: ensure_model(model),
+                    provider,
+                    timestamp: ts,
+                    input_tokens: input as u64,
+                    output_tokens: output as u64,
+                    cache_read_tokens: cache_read as u64,
+                    cache_creation_tokens: cache_write as u64,
+                    reasoning_tokens: reasoning as u64,
+                    cost_usd: None,
+                    source_file: path.clone(),
+                };
+                rec.cost_usd = prices.cost_for(&rec, &settings.model_overrides);
+                sink(rec)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn parse_model_json(json: Option<&str>) -> (String, Option<String>) {
+    let Some(s) = json else {
+        return (String::new(), None);
+    };
+    let Ok(val) = serde_json::from_str::<Value>(s) else {
+        return (s.to_string(), None);
+    };
+    let provider = val
+        .get("providerID")
+        .or_else(|| val.get("provider"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let model = val
+        .get("id")
+        .or_else(|| val.get("model"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    (model, provider)
+}
