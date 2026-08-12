@@ -53,3 +53,7 @@ GEMINI.md
 _tmp*
 *.tmp
 .cache/
+
+# Icon source art
+raw_icon.png
+icon-transparent-1024.png
