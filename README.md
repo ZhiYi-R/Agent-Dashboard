@@ -188,7 +188,8 @@ cd src-tauri && cargo test --lib
 
 ## 许可证（AGPL v3）
 
-本项目以 **[GNU Affero General Public License v3.0](./LICENSE)**（AGPL-3.0）发布。
+本项目以 **[GNU Affero General Public License v3.0](./LICENSE)**（**AGPL-3.0-only**）发布。  
+`package.json` 与 `src-tauri/Cargo.toml` 中的 `license` 字段与此一致。
 
 ### 用白话说意味着什么
 
@@ -199,6 +200,44 @@ cd src-tauri && cargo test --lib
 
 完整法律文本见仓库根目录 [`LICENSE`](./LICENSE)（与 [GNU 官方 AGPL-3.0 文本](https://www.gnu.org/licenses/agpl-3.0.txt) 一致）。  
 若你计划闭源商用、嵌入专有 SaaS 或与不兼容许可证组合，请先自行阅读全文或咨询法律顾问。
+
+### 第三方依赖声明
+
+本应用会链接 / 打包大量开源第三方组件。它们**各自保留原许可证**；本仓库源码以 AGPL-3.0-only 授权，并不改变这些依赖的原有条款。再分发二进制时，请一并保留其版权与许可声明（完整清单可用 `npx license-checker`、`cargo metadata` 等生成）。
+
+#### 直接依赖（前端）
+
+| 组件 | 许可证 | 说明 |
+|------|--------|------|
+| React、React DOM、Recharts、Radix UI、clsx、tailwind-merge、shadcn、tw-animate-css 等 | MIT | 宽松许可 |
+| class-variance-authority | Apache-2.0 | 需保留 NOTICE/版权声明（若附带） |
+| lucide-react | ISC | 宽松许可 |
+| @tauri-apps/api | Apache-2.0 OR MIT | 双许可，任选其一遵守 |
+| @tauri-apps/plugin-opener | MIT OR Apache-2.0 | 同上 |
+| [@fontsource-variable/geist](https://github.com/fontsource/font-files)（Geist 字体） | **OFL-1.1** | 可随软件嵌入与分发；**不得单独出售字体文件**；须保留 OFL 声明 |
+
+#### 直接依赖（Rust / Tauri）
+
+| 组件 | 许可证 | 说明 |
+|------|--------|------|
+| tauri、tauri-build、tauri-plugin-opener | Apache-2.0 OR MIT | 双许可 |
+| serde、serde_json、chrono、anyhow、thiserror、regex、dirs、reqwest 等 | MIT OR Apache-2.0 | 双许可 |
+| rusqlite、zstd | MIT | 宽松许可 |
+| walkdir | Unlicense / MIT | 宽松许可 |
+
+#### 传递依赖中需留意的类型（非完整列表）
+
+| 类型 | 示例 | 对再分发的影响 |
+|------|------|----------------|
+| **MPL-2.0** | cssparser、selectors 等（经 UI/CSS 相关 crate 引入） | 文件级弱 copyleft；修改这些 MPL 文件时需按 MPL 公开对应修改 |
+| **LGPL 可选条款** | 如 `r-efi`（`MIT OR Apache-2.0 OR LGPL-2.1-or-later`） | 可选 MIT/Apache，按宽松条款使用即可 |
+| **CC-BY-4.0** | caniuse-lite（browserslist 数据，多见于构建链） | 内容许可，保留署名即可 |
+| **OFL-1.1** | Geist 字体（见上） | 见字体条款 |
+| **Unicode / Zlib / BSD / ISC / BlueOak / 0BSD / CDLA-Permissive / CC0** 等 | 大量传递 crate / 数据 | 宽松或公共领域类，按各自文本保留声明 |
+
+当前直接与传递依赖中**未发现** SSPL、BUSL、Elastic License 等与 AGPL 组合通常有问题的专有 / 强限制许可证。依赖会随版本变化，发布前建议再跑一遍许可证扫描。
+
+以上说明便于合规自查，**不构成法律意见**。
 
 ---
 
