@@ -100,8 +100,11 @@ export default function App() {
   const handleScanRef = useRef<(full?: boolean) => void>(() => {});
   const scanningRef = useRef(false);
   const refreshInFlightRef = useRef(false);
+  const liveRefreshTimerRef = useRef<number | null>(null);
   const filterRef = useRef(filter);
   filterRef.current = filter;
+  const offsetRef = useRef(offset);
+  offsetRef.current = offset;
 
   const load = async () => {
     setLoading(true);
@@ -123,10 +126,35 @@ export default function App() {
     }
   };
 
-  const refreshData = async (nextOffset = offset, nextFilter = filter) => {
-    // Avoid stacking heavy summary queries while a previous refresh is still running
-    // (scan used to poll this every 800ms and freeze the UI).
+  const clearUsageView = () => {
+    setRecords([]);
+    setRecordCount(0);
+    setSummary(null);
+    setFilterModels([]);
+    setFilterProjects([]);
+    setOffset(0);
+  };
+
+  const stopLiveRefresh = () => {
+    if (liveRefreshTimerRef.current != null) {
+      window.clearInterval(liveRefreshTimerRef.current);
+      liveRefreshTimerRef.current = null;
+    }
+  };
+
+  /**
+   * Full dashboard refresh (records + count + heavy summary).
+   * Mid-scan 800ms polling froze the UI because getSummary does multiple
+   * full-table GROUP BY aggregates while the scanner is writing WAL — not
+   * because of the timer itself. Use allowDuringScan sparingly with a long interval.
+   */
+  const refreshData = async (
+    nextOffset = offset,
+    nextFilter = filter,
+    opts?: { allowDuringScan?: boolean }
+  ) => {
     if (refreshInFlightRef.current) return;
+    if (scanningRef.current && !opts?.allowDuringScan) return;
     refreshInFlightRef.current = true;
     try {
       const [recs, total, sum] = await Promise.all([
@@ -144,9 +172,20 @@ export default function App() {
     }
   };
 
+  /** Cheap mid-scan tick: only COUNT(*) so the UI numbers move without full re-agg. */
+  const refreshCountOnly = async (nextFilter = filter) => {
+    if (refreshInFlightRef.current) return;
+    try {
+      const total = await countRecords(nextFilter);
+      setRecordCount(total);
+    } catch (e) {
+      console.error("count refresh failed:", e);
+    }
+  };
+
   useEffect(() => {
     latestRefreshRef.current = () => {
-      void refreshData(offset, filter);
+      void refreshData(offsetRef.current, filterRef.current);
     };
   }, [offset, filter]);
 
@@ -190,9 +229,11 @@ export default function App() {
     );
     unlisten.push(
       listen<{ total: number; errors: string[] }>("scan-finished", () => {
+        stopLiveRefresh();
+        scanningRef.current = false;
         setScanning(false);
         setScanProgress({});
-        // One-shot refresh after scan — no mid-scan polling.
+        // Final full refresh after scan completes.
         void (async () => {
           try {
             const a = await getAgents();
@@ -200,13 +241,16 @@ export default function App() {
           } catch (e) {
             console.error(e);
           }
-          latestRefreshRef.current();
+          await refreshData(offsetRef.current, filterRef.current, {
+            allowDuringScan: true,
+          });
           const f = filterRef.current;
           try {
             const [ms, ps] = await Promise.all([
               listFilterModels(f),
               listFilterProjects(f),
             ]);
+            if (scanningRef.current) return;
             setFilterModels(ms);
             setFilterProjects(ps);
           } catch (e) {
@@ -237,18 +281,21 @@ export default function App() {
 
     return () => {
       unlisten.forEach((p) => p.then((f) => f()));
+      stopLiveRefresh();
     };
   }, []);
 
   useEffect(() => {
     if (!settings) return;
+    if (scanningRef.current) return;
     setOffset(0);
-    refreshData(0, filter);
+    void refreshData(0, filter);
     void Promise.all([
       listFilterModels(filter),
       listFilterProjects(filter),
     ])
       .then(([ms, ps]) => {
+        if (scanningRef.current) return;
         setFilterModels(ms);
         setFilterProjects(ps);
       })
@@ -258,20 +305,50 @@ export default function App() {
 
   useEffect(() => {
     if (!settings) return;
-    refreshData(offset, filter);
+    if (scanningRef.current) return;
+    void refreshData(offset, filter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offset]);
 
   const handleScan = async (full = false) => {
+    // Mark scanning before any awaits so concurrent refreshes bail out.
+    stopLiveRefresh();
+    scanningRef.current = true;
     setScanning(true);
     setScanProgress({});
+    if (full) {
+      // Full scan rebuilds the DB — drop stale overview/records immediately.
+      clearUsageView();
+    }
     try {
-      // Progress is event-driven only. Mid-scan full-table refresh freezes the UI.
       await startScan(full);
+      // Staged live updates while scanning:
+      // - every 1.5s: cheap COUNT so the UI is clearly alive
+      // - every 4th tick (~6s): full summary (records + by-agent/model/day)
+      // Why not 800ms full refresh? getSummary runs several full-table GROUP BYs
+      // while the scanner is writing; requests pile up and the main thread janks.
+      let tick = 0;
+      liveRefreshTimerRef.current = window.setInterval(() => {
+        if (!scanningRef.current) {
+          stopLiveRefresh();
+          return;
+        }
+        tick += 1;
+        const f = filterRef.current;
+        if (tick % 4 === 0) {
+          void refreshData(offsetRef.current, f, { allowDuringScan: true });
+        } else {
+          void refreshCountOnly(f);
+        }
+      }, 1500);
     } catch (e) {
       console.error(e);
+      stopLiveRefresh();
+      scanningRef.current = false;
       setScanning(false);
       setScanProgress({});
+      // Recover view if the scan never started.
+      latestRefreshRef.current();
     }
   };
   handleScanRef.current = (full = false) => {
@@ -359,11 +436,15 @@ export default function App() {
   };
 
   const enabledAgentCount = Math.max(1, agents.filter((a) => a.enabled).length);
+  const agentsDone = Object.keys(scanProgress).length;
   const scanPct = Math.min(
     100,
-    Math.round((Object.keys(scanProgress).length / enabledAgentCount) * 100)
+    Math.round((agentsDone / enabledAgentCount) * 100)
   );
-  const lastScan = Object.values(scanProgress).find((p) => p.count > 0);
+  const scanEntries = Object.values(scanProgress);
+  const lastScan =
+    scanEntries.length > 0 ? scanEntries[scanEntries.length - 1] : undefined;
+  const scanRows = scanEntries.reduce((n, p) => n + (p.count || 0), 0);
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
@@ -383,10 +464,15 @@ export default function App() {
           </TabsList>
           <div className="flex items-center gap-2">
             {scanning && (
-              <div className="flex w-44 flex-col gap-1">
-                <div className="flex justify-between text-[10px] text-muted-foreground">
-                  <span className="truncate">{lastScan?.agent ?? "Scanning"}</span>
-                  <span>{scanPct}%</span>
+              <div className="flex w-56 flex-col gap-1">
+                <div className="flex justify-between gap-2 text-[10px] text-muted-foreground">
+                  <span className="truncate">
+                    {lastScan?.agent ?? "Scanning"}
+                    {scanRows > 0 ? ` · ${formatNumber(scanRows)} rows` : ""}
+                  </span>
+                  <span className="shrink-0 tabular-nums">
+                    {agentsDone}/{enabledAgentCount}
+                  </span>
                 </div>
                 <Progress value={scanPct} />
               </div>
