@@ -149,7 +149,6 @@ impl Collector for KimiCollector {
 }
 
 struct ParsedUsage {
-    model: Option<String>,
     model_raw: Option<String>,
     timestamp: Option<chrono::DateTime<Utc>>,
     input_tokens: u64,
@@ -254,10 +253,8 @@ fn tokens_from_usage(
     ]);
     let reasoning_tokens = u64_field(&["reasoning", "reasoning_tokens", "thinking"]);
 
-    let model_raw = model.clone();
     ParsedUsage {
-        model,
-        model_raw,
+        model_raw: model,
         timestamp,
         input_tokens,
         output_tokens,
@@ -854,7 +851,10 @@ mod tests {
         assert_eq!(p.input_tokens, 100);
         assert_eq!(p.output_tokens, 20);
         assert_eq!(p.cache_read_tokens, 50);
-        assert_eq!(p.model.as_deref(), Some("opencode-go/deepseek-v4-flash"));
+        assert_eq!(
+            p.model_raw.as_deref(),
+            Some("opencode-go/deepseek-v4-flash")
+        );
     }
 
     #[test]

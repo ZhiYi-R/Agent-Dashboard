@@ -187,7 +187,8 @@ fn run_scan(
             db.insert_record(&rec)?;
             count += 1;
             total += 1;
-            if count - last_emit >= 100 {
+            // Throttle UI events — full scans can emit tens of thousands of rows.
+            if count - last_emit >= 500 {
                 let _ = app.emit(
                     "scan-progress",
                     ScanProgress {

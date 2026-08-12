@@ -96,10 +96,12 @@ export default function App() {
   const [balanceAutoToken, setBalanceAutoToken] = useState(0);
   const [settingsEditing, setSettingsEditing] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<AppSettings | null>(null);
-  const scanPollRef = useRef<number | null>(null);
   const latestRefreshRef = useRef<() => void>(() => {});
   const handleScanRef = useRef<(full?: boolean) => void>(() => {});
   const scanningRef = useRef(false);
+  const refreshInFlightRef = useRef(false);
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
 
   const load = async () => {
     setLoading(true);
@@ -122,6 +124,10 @@ export default function App() {
   };
 
   const refreshData = async (nextOffset = offset, nextFilter = filter) => {
+    // Avoid stacking heavy summary queries while a previous refresh is still running
+    // (scan used to poll this every 800ms and freeze the UI).
+    if (refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
     try {
       const [recs, total, sum] = await Promise.all([
         getRecords(nextFilter, PAGE_SIZE, nextOffset),
@@ -133,12 +139,16 @@ export default function App() {
       setSummary(sum);
     } catch (e) {
       console.error("refresh failed:", e);
+    } finally {
+      refreshInFlightRef.current = false;
     }
   };
 
   useEffect(() => {
-    latestRefreshRef.current = () => refreshData(offset, filter);
-  }, [refreshData, offset, filter]);
+    latestRefreshRef.current = () => {
+      void refreshData(offset, filter);
+    };
+  }, [offset, filter]);
 
   useEffect(() => {
     scanningRef.current = scanning;
@@ -182,11 +192,27 @@ export default function App() {
       listen<{ total: number; errors: string[] }>("scan-finished", () => {
         setScanning(false);
         setScanProgress({});
-        if (scanPollRef.current) {
-          window.clearInterval(scanPollRef.current);
-          scanPollRef.current = null;
-        }
-        load();
+        // One-shot refresh after scan — no mid-scan polling.
+        void (async () => {
+          try {
+            const a = await getAgents();
+            setAgents(a);
+          } catch (e) {
+            console.error(e);
+          }
+          latestRefreshRef.current();
+          const f = filterRef.current;
+          try {
+            const [ms, ps] = await Promise.all([
+              listFilterModels(f),
+              listFilterProjects(f),
+            ]);
+            setFilterModels(ms);
+            setFilterProjects(ps);
+          } catch (e) {
+            console.error(e);
+          }
+        })();
       })
     );
     unlisten.push(
@@ -211,10 +237,6 @@ export default function App() {
 
     return () => {
       unlisten.forEach((p) => p.then((f) => f()));
-      if (scanPollRef.current) {
-        window.clearInterval(scanPollRef.current);
-        scanPollRef.current = null;
-      }
     };
   }, []);
 
@@ -243,23 +265,13 @@ export default function App() {
   const handleScan = async (full = false) => {
     setScanning(true);
     setScanProgress({});
-    if (scanPollRef.current) {
-      window.clearInterval(scanPollRef.current);
-      scanPollRef.current = null;
-    }
     try {
+      // Progress is event-driven only. Mid-scan full-table refresh freezes the UI.
       await startScan(full);
-      scanPollRef.current = window.setInterval(() => {
-        latestRefreshRef.current();
-      }, 800);
     } catch (e) {
       console.error(e);
       setScanning(false);
       setScanProgress({});
-      if (scanPollRef.current) {
-        window.clearInterval(scanPollRef.current);
-        scanPollRef.current = null;
-      }
     }
   };
   handleScanRef.current = (full = false) => {
