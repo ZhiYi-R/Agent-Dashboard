@@ -2,9 +2,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Minus, Square, X } from "lucide-react";
+import { useT } from "@/i18n";
 
 export function TitleBar() {
   const win = getCurrentWindow();
+  const t = useT();
 
   return (
     <div
@@ -12,9 +14,9 @@ export function TitleBar() {
       className="flex h-10 shrink-0 select-none items-center justify-between border-b bg-background pl-4 pr-2"
     >
       <div className="flex items-center gap-2" data-tauri-drag-region>
-        <span className="text-sm font-semibold">Agent Statistics</span>
+        <span className="text-sm font-semibold">{t("app.title")}</span>
         <span className="text-[10px] text-muted-foreground" data-tauri-drag-region>
-          Token & Cost Dashboard
+          {t("app.subtitle")}
         </span>
       </div>
 

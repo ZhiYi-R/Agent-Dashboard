@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/table";
 import { Plus, Trash2 } from "lucide-react";
 import type { ModelOverride } from "@/types";
+import { useT } from "@/i18n";
 
 interface ModelOverridesProps {
   overrides: Record<string, ModelOverride>;
@@ -73,6 +74,7 @@ export function ModelOverridesEditor({
   };
 
   const entries = Object.entries(draft);
+  const t = useT();
 
   return (
     <div className="space-y-2">
@@ -80,7 +82,7 @@ export function ModelOverridesEditor({
         <div className="flex justify-end">
           <Button variant="outline" size="sm" onClick={addOverride}>
             <Plus className="mr-1 h-3.5 w-3.5" />
-            Add
+            {t("actions.add")}
           </Button>
         </div>
       )}
@@ -92,13 +94,13 @@ export function ModelOverridesEditor({
           <Table>
             <TableHeader className="sticky top-0 bg-card">
               <TableRow>
-                <TableHead className="w-40 text-xs">Model</TableHead>
-                <TableHead className="w-40 text-xs">Aliases</TableHead>
-                <TableHead className="w-20 text-right text-xs">In</TableHead>
-                <TableHead className="w-20 text-right text-xs">Out</TableHead>
-                <TableHead className="w-20 text-right text-xs">C.R</TableHead>
-                <TableHead className="w-20 text-right text-xs">C.W</TableHead>
-                <TableHead className="w-20 text-right text-xs">Rsn</TableHead>
+                <TableHead className="w-40 text-xs">{t("modelOverrides.model")}</TableHead>
+                <TableHead className="w-40 text-xs">{t("modelOverrides.aliases")}</TableHead>
+                <TableHead className="w-20 text-right text-xs">{t("modelOverrides.in")}</TableHead>
+                <TableHead className="w-20 text-right text-xs">{t("modelOverrides.out")}</TableHead>
+                <TableHead className="w-20 text-right text-xs">{t("modelOverrides.cacheRead")}</TableHead>
+                <TableHead className="w-20 text-right text-xs">{t("modelOverrides.cacheWrite")}</TableHead>
+                <TableHead className="w-20 text-right text-xs">{t("modelOverrides.reasoning")}</TableHead>
                 {!readOnly && <TableHead className="w-10" />}
               </TableRow>
             </TableHeader>

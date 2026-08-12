@@ -32,6 +32,7 @@ import {
   AlertCircle,
   CheckCircle2,
 } from "lucide-react";
+import { useT } from "@/i18n";
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -73,6 +74,7 @@ interface Props {
 }
 
 function WindowBar({ w }: { w: BalanceWindow }) {
+  const t = useT();
   const used =
     w.usedPercent !== undefined
       ? Math.min(100, Math.max(0, w.usedPercent))
@@ -87,9 +89,15 @@ function WindowBar({ w }: { w: BalanceWindow }) {
         <span className="font-medium text-foreground/90">{w.name}</span>
         <span className="tabular-nums text-muted-foreground">
           {used !== undefined
-            ? `${used.toFixed(0)}% · ${remainingPct?.toFixed(0)}% left`
+            ? t("balance.leftPct", {
+                used: used.toFixed(0),
+                left: remainingPct?.toFixed(0) ?? "0",
+              })
             : w.remaining !== undefined
-              ? `${w.remaining}${w.unit ? " " + w.unit : ""} left`
+              ? t("balance.leftUnit", {
+                  n: w.remaining,
+                  unit: w.unit ? ` ${w.unit}` : "",
+                })
               : "--"}
         </span>
       </div>
@@ -116,6 +124,7 @@ function KeyDashboardCard({
   onCheck: () => void;
   checking: boolean;
 }) {
+  const t = useT();
   const meta = BALANCE_PROVIDER_META[provider.providerType];
   const ok = result?.success;
   const windows = result?.windows ?? [];
@@ -156,13 +165,13 @@ function KeyDashboardCard({
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Available
+                  {t("balance.available")}
                 </p>
                 <p className="truncate text-lg font-semibold tabular-nums">
                   {result.available !== undefined
                     ? formatMoney(result.available, result.currency)
                     : windows.length > 0
-                      ? "Quota"
+                      ? t("balance.quota")
                       : "--"}
                 </p>
                 {result.total !== undefined && Number.isFinite(result.total) && (
@@ -173,7 +182,7 @@ function KeyDashboardCard({
               </div>
               <Badge className="gap-1 text-[10px]">
                 <CheckCircle2 className="h-3 w-3" />
-                OK
+                {t("balance.statusOk")}
               </Badge>
             </div>
             {windows.length > 0 && (
@@ -193,7 +202,7 @@ function KeyDashboardCard({
           <div className="space-y-1">
             <Badge variant="destructive" className="gap-1 text-[10px]">
               <AlertCircle className="h-3 w-3" />
-              Failed
+              {t("balance.statusFailed")}
             </Badge>
             <p className="text-[11px] leading-snug text-destructive">
               {result.message}
@@ -211,6 +220,7 @@ export function BalanceTab({
   autoRefreshToken = 0,
   active = false,
 }: Props) {
+  const t = useT();
   const savedProviders = settings.balanceProviders ?? [];
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<BalanceProvider[]>(() =>
@@ -347,11 +357,15 @@ export function BalanceTab({
       for (const p of draft) {
         const meta = BALANCE_PROVIDER_META[p.providerType];
         if (meta.needsBaseUrl && !p.baseUrl?.trim()) {
-          throw new Error(`${p.name || meta.label}: Base URL required`);
+          throw new Error(
+            t("balance.baseUrlRequiredErr", { name: p.name || meta.label })
+          );
         }
         for (const k of p.keys) {
           if (!k.key.trim()) {
-            throw new Error(`${p.name} / ${k.name}: empty key`);
+            throw new Error(
+              t("balance.emptyKey", { provider: p.name, key: k.name })
+            );
           }
         }
       }
@@ -456,13 +470,17 @@ export function BalanceTab({
       <div className="flex h-full min-h-0 flex-1 flex-col gap-3">
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-            <span className="text-sm font-semibold text-foreground">Balance</span>
-            <span>{summaryStats.total} keys</span>
+            <span className="text-sm font-semibold text-foreground">
+              {t("balance.title")}
+            </span>
+            <span>{t("balance.keys", { n: summaryStats.total })}</span>
             <span className="text-emerald-600 dark:text-emerald-400">
-              {summaryStats.ok} ok
+              {t("balance.ok", { n: summaryStats.ok })}
             </span>
             {summaryStats.fail > 0 && (
-              <span className="text-destructive">{summaryStats.fail} failed</span>
+              <span className="text-destructive">
+                {t("balance.failed", { n: summaryStats.fail })}
+              </span>
             )}
             {lastCheckedAt && (
               <span>{lastCheckedAt.toLocaleString()}</span>
@@ -471,7 +489,7 @@ export function BalanceTab({
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" onClick={enterEdit}>
               <Pencil className="mr-1 h-3.5 w-3.5" />
-              Edit
+              {t("actions.edit")}
             </Button>
             <Button
               size="sm"
@@ -481,7 +499,7 @@ export function BalanceTab({
               <RefreshCw
                 className={`mr-1 h-3.5 w-3.5 ${checking ? "animate-spin" : ""}`}
               />
-              {checking ? "…" : "Refresh"}
+              {checking ? "…" : t("actions.refresh")}
             </Button>
           </div>
         </div>
@@ -496,9 +514,9 @@ export function BalanceTab({
           {dashboardCards.length === 0 ? (
             <div className="flex h-full min-h-[160px] items-center justify-center text-sm text-muted-foreground">
               <Button variant="link" className="px-1" onClick={enterEdit}>
-                Edit
+                {t("actions.edit")}
               </Button>
-              to add providers
+              {t("balance.addProviders")}
             </div>
           ) : (
             <div
@@ -528,7 +546,7 @@ export function BalanceTab({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col gap-3">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-semibold">Edit Balance</span>
+        <span className="text-sm font-semibold">{t("balance.editTitle")}</span>
         <div className="flex flex-wrap items-center gap-2">
           <select
             className="h-8 rounded-md border bg-background px-2 text-xs"
@@ -542,21 +560,21 @@ export function BalanceTab({
             }}
           >
             <option value="" disabled>
-              + Provider
+              {t("balance.providerOption")}
             </option>
-            {PROVIDER_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {BALANCE_PROVIDER_META[t].label}
+            {PROVIDER_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {BALANCE_PROVIDER_META[type].label}
               </option>
             ))}
           </select>
           <Button size="sm" variant="ghost" onClick={cancelEdit} disabled={saving}>
             <X className="mr-1 h-3.5 w-3.5" />
-            Cancel
+            {t("actions.cancel")}
           </Button>
           <Button size="sm" onClick={() => void saveEdit()} disabled={saving}>
             <Save className="mr-1 h-3.5 w-3.5" />
-            {saving ? "…" : "Save"}
+            {saving ? "…" : t("actions.save")}
           </Button>
         </div>
       </div>
@@ -570,7 +588,7 @@ export function BalanceTab({
       <div className="min-h-0 flex-1 space-y-3 overflow-auto">
         {draft.length === 0 && (
           <div className="rounded-md border border-dashed py-10 text-center text-sm text-muted-foreground">
-            Add a provider type
+            {t("balance.addProviderType")}
           </div>
         )}
 
@@ -599,7 +617,7 @@ export function BalanceTab({
               <CardContent className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Name</Label>
+                    <Label className="text-xs">{t("balance.name")}</Label>
                     <Input
                       className="h-8 text-xs"
                       value={p.name}
@@ -609,7 +627,7 @@ export function BalanceTab({
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Type</Label>
+                    <Label className="text-xs">{t("balance.type")}</Label>
                     <select
                       className="h-8 w-full rounded-md border bg-background px-2 text-xs"
                       value={p.providerType}
@@ -624,9 +642,9 @@ export function BalanceTab({
                         });
                       }}
                     >
-                      {PROVIDER_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {BALANCE_PROVIDER_META[t].label}
+                      {PROVIDER_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {BALANCE_PROVIDER_META[type].label}
                         </option>
                       ))}
                     </select>
@@ -634,7 +652,9 @@ export function BalanceTab({
                   {(meta.needsBaseUrl || p.baseUrl !== undefined) && (
                     <div className="space-y-1.5 sm:col-span-2">
                       <Label className="text-xs">
-                        Base URL{meta.needsBaseUrl ? " *" : ""}
+                        {meta.needsBaseUrl
+                          ? t("balance.baseUrlRequired")
+                          : t("balance.baseUrl")}
                       </Label>
                       <Input
                         className="h-8 font-mono text-xs"
@@ -653,10 +673,10 @@ export function BalanceTab({
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium">Keys</p>
+                  <p className="text-xs font-medium">{t("balance.keysLabel")}</p>
                   <Button size="sm" variant="outline" onClick={() => addKey(p.id)}>
                     <Plus className="mr-1 h-3.5 w-3.5" />
-                    Add
+                    {t("actions.add")}
                   </Button>
                 </div>
 
@@ -671,7 +691,7 @@ export function BalanceTab({
                       >
                         <Input
                           className="h-8 text-xs"
-                          placeholder="Name"
+                          placeholder={t("balance.keyPlaceholder")}
                           value={k.name}
                           onChange={(e) =>
                             updateKey(p.id, k.id, { name: e.target.value })

@@ -7,15 +7,18 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useTheme, type Theme } from "@/components/theme-provider";
 import { Monitor, Moon, Sun } from "lucide-react";
-
-const options: { value: Theme; label: string; icon: React.ElementType }[] = [
-  { value: "light", label: "Light", icon: Sun },
-  { value: "dark", label: "Dark", icon: Moon },
-  { value: "system", label: "System", icon: Monitor },
-];
+import { useT } from "@/i18n";
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
+  const t = useT();
+
+  const options: { value: Theme; label: string; icon: React.ElementType }[] = [
+    { value: "light", label: t("theme.light"), icon: Sun },
+    { value: "dark", label: t("theme.dark"), icon: Moon },
+    { value: "system", label: t("theme.system"), icon: Monitor },
+  ];
+
   const active = options.find((o) => o.value === theme) || options[2];
   const Icon = active.icon;
 
@@ -24,7 +27,7 @@ export function ThemeToggle() {
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="h-8 w-8">
           <Icon className="h-4 w-4" />
-          <span className="sr-only">Theme</span>
+          <span className="sr-only">{t("theme.label")}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

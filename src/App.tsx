@@ -38,6 +38,7 @@ import { BalanceTab } from "@/components/balance-tab";
 import { TitleBar } from "@/components/title-bar";
 import { VirtualTableBody } from "@/components/virtual-table-body";
 import { Pencil, Save, X } from "lucide-react";
+import { useI18n, useT, type Locale } from "@/i18n";
 
 import {
   Bar,
@@ -78,6 +79,8 @@ function formatPercent(n?: number) {
 }
 
 export default function App() {
+  const t = useT();
+  const { locale, setLocale } = useI18n();
   const [activeTab, setActiveTab] = useState("overview");
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -457,18 +460,20 @@ export default function App() {
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2">
           <TabsList>
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="records">Records</TabsTrigger>
-            <TabsTrigger value="balance">Balance</TabsTrigger>
-            <TabsTrigger value="settings">Settings</TabsTrigger>
+            <TabsTrigger value="overview">{t("tabs.overview")}</TabsTrigger>
+            <TabsTrigger value="records">{t("tabs.records")}</TabsTrigger>
+            <TabsTrigger value="balance">{t("tabs.balance")}</TabsTrigger>
+            <TabsTrigger value="settings">{t("tabs.settings")}</TabsTrigger>
           </TabsList>
           <div className="flex items-center gap-2">
             {scanning && (
               <div className="flex w-56 flex-col gap-1">
                 <div className="flex justify-between gap-2 text-[10px] text-muted-foreground">
                   <span className="truncate">
-                    {lastScan?.agent ?? "Scanning"}
-                    {scanRows > 0 ? ` · ${formatNumber(scanRows)} rows` : ""}
+                    {lastScan?.agent ?? t("scan.scanning")}
+                    {scanRows > 0
+                      ? ` · ${t("scan.rows", { n: formatNumber(scanRows) })}`
+                      : ""}
                   </span>
                   <span className="shrink-0 tabular-nums">
                     {agentsDone}/{enabledAgentCount}
@@ -480,7 +485,7 @@ export default function App() {
             {priceProgress && (
               <div className="flex w-36 flex-col gap-1">
                 <div className="flex justify-between text-[10px] text-muted-foreground">
-                  <span>Prices</span>
+                  <span>{t("scan.prices")}</span>
                   <span>
                     {Math.round(
                       (priceProgress.count / Math.max(1, priceProgress.total)) * 100
@@ -501,7 +506,7 @@ export default function App() {
               variant="outline"
               size="sm"
             >
-              {syncing ? "Syncing…" : "Sync prices"}
+              {syncing ? t("actions.syncing") : t("actions.syncPrices")}
             </Button>
             <Button
               onClick={() => handleScan(true)}
@@ -509,14 +514,14 @@ export default function App() {
               variant="outline"
               size="sm"
             >
-              Full scan
+              {t("actions.fullScan")}
             </Button>
             <Button
               onClick={() => handleScan(false)}
               disabled={scanning}
               size="sm"
             >
-              {scanning ? "Scanning…" : "Scan"}
+              {scanning ? t("actions.scanning") : t("actions.scan")}
             </Button>
           </div>
         </div>
@@ -535,13 +540,13 @@ export default function App() {
               <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                 {(
                   [
-                    ["Records", formatNumber(summary?.records ?? 0)],
-                    ["Sessions", formatNumber(summary?.sessions ?? 0)],
-                    ["Cost", formatCost(summary?.totalCostUsd)],
-                    ["Input", formatTokens(summary?.totalInput)],
-                    ["Output", formatTokens(summary?.totalOutput)],
+                    [t("overview.records"), formatNumber(summary?.records ?? 0)],
+                    [t("overview.sessions"), formatNumber(summary?.sessions ?? 0)],
+                    [t("overview.cost"), formatCost(summary?.totalCostUsd)],
+                    [t("overview.input"), formatTokens(summary?.totalInput)],
+                    [t("overview.output"), formatTokens(summary?.totalOutput)],
                     [
-                      "Cache",
+                      t("overview.cache"),
                       formatTokens(
                         (summary?.totalCacheRead ?? 0) +
                           (summary?.totalCacheCreation ?? 0)
@@ -562,7 +567,7 @@ export default function App() {
 
               <Card className="flex h-[220px] shrink-0 flex-col sm:h-[260px]">
                 <CardHeader className="shrink-0 py-2">
-                  <CardTitle className="text-sm">Daily usage</CardTitle>
+                  <CardTitle className="text-sm">{t("overview.dailyUsage")}</CardTitle>
                 </CardHeader>
                 <CardContent className="min-h-0 flex-1 p-0 pb-2 pr-2">
                   {chartData.length === 0 ? (
@@ -598,8 +603,10 @@ export default function App() {
                         <Tooltip
                           formatter={(v, name) => {
                             const val = v == null ? 0 : Number(v);
+                            const isCost =
+                              name === t("overview.cost") || name === "Cost";
                             return [
-                              name === "Cost" ? formatCost(val) : formatTokens(val),
+                              isCost ? formatCost(val) : formatTokens(val),
                               name,
                             ];
                           }}
@@ -609,7 +616,7 @@ export default function App() {
                         <Bar
                           yAxisId="left"
                           dataKey="totalCostUsd"
-                          name="Cost"
+                          name={t("overview.cost")}
                           fill="var(--primary)"
                           radius={[3, 3, 0, 0]}
                         />
@@ -617,7 +624,7 @@ export default function App() {
                           yAxisId="right"
                           type="monotone"
                           dataKey="totalInput"
-                          name="Input"
+                          name={t("overview.input")}
                           stroke="#3b82f6"
                           dot={false}
                           strokeWidth={2}
@@ -626,7 +633,7 @@ export default function App() {
                           yAxisId="right"
                           type="monotone"
                           dataKey="totalOutput"
-                          name="Output"
+                          name={t("overview.output")}
                           stroke="#10b981"
                           dot={false}
                           strokeWidth={2}
@@ -635,7 +642,7 @@ export default function App() {
                           yAxisId="right"
                           type="monotone"
                           dataKey="totalCacheRead"
-                          name="Cache Hit"
+                          name={t("overview.cacheHit")}
                           stroke="#f59e0b"
                           dot={false}
                           strokeWidth={2}
@@ -644,7 +651,7 @@ export default function App() {
                           yAxisId="right"
                           type="monotone"
                           dataKey="totalCacheCreation"
-                          name="Cache Write"
+                          name={t("overview.cacheWrite")}
                           stroke="#8b5cf6"
                           dot={false}
                           strokeWidth={2}
@@ -653,7 +660,7 @@ export default function App() {
                           yAxisId="right"
                           type="monotone"
                           dataKey="totalReasoning"
-                          name="Reasoning"
+                          name={t("overview.reasoning")}
                           stroke="#ec4899"
                           dot={false}
                           strokeWidth={2}
@@ -667,19 +674,19 @@ export default function App() {
               <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-2">
                 <Card className="flex min-h-0 flex-col overflow-hidden">
                   <CardHeader className="shrink-0 border-b py-2">
-                    <CardTitle className="text-sm">By Agent</CardTitle>
+                    <CardTitle className="text-sm">{t("overview.byAgent")}</CardTitle>
                   </CardHeader>
                   <CardContent className="min-h-0 flex-1 overflow-auto p-0">
                     <Table>
                       <TableHeader className="sticky top-0 z-20 shadow-sm [&_th]:sticky [&_th]:top-0 [&_th]:z-20">
                         <TableRow>
-                          <TableHead>Agent</TableHead>
-                          <TableHead className="text-right">Rec</TableHead>
-                          <TableHead className="text-right">Input</TableHead>
-                          <TableHead className="text-right">Output</TableHead>
-                          <TableHead className="text-right">Cache</TableHead>
-                          <TableHead className="text-right">Hit %</TableHead>
-                          <TableHead className="text-right">Cost</TableHead>
+                          <TableHead>{t("overview.agent")}</TableHead>
+                          <TableHead className="text-right">{t("overview.rec")}</TableHead>
+                          <TableHead className="text-right">{t("overview.input")}</TableHead>
+                          <TableHead className="text-right">{t("overview.output")}</TableHead>
+                          <TableHead className="text-right">{t("overview.cache")}</TableHead>
+                          <TableHead className="text-right">{t("overview.hitRate")}</TableHead>
+                          <TableHead className="text-right">{t("overview.cost")}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <VirtualTableBody
@@ -715,19 +722,19 @@ export default function App() {
 
                 <Card className="flex min-h-0 flex-col overflow-hidden">
                   <CardHeader className="shrink-0 border-b py-2">
-                    <CardTitle className="text-sm">By Model</CardTitle>
+                    <CardTitle className="text-sm">{t("overview.byModel")}</CardTitle>
                   </CardHeader>
                   <CardContent className="min-h-0 flex-1 overflow-auto p-0">
                     <Table>
                       <TableHeader className="sticky top-0 z-20 shadow-sm [&_th]:sticky [&_th]:top-0 [&_th]:z-20">
                         <TableRow>
-                          <TableHead>Model</TableHead>
-                          <TableHead className="text-right">Rec</TableHead>
-                          <TableHead className="text-right">Input</TableHead>
-                          <TableHead className="text-right">Output</TableHead>
-                          <TableHead className="text-right">Cache</TableHead>
-                          <TableHead className="text-right">Hit %</TableHead>
-                          <TableHead className="text-right">Cost</TableHead>
+                          <TableHead>{t("overview.model")}</TableHead>
+                          <TableHead className="text-right">{t("overview.rec")}</TableHead>
+                          <TableHead className="text-right">{t("overview.input")}</TableHead>
+                          <TableHead className="text-right">{t("overview.output")}</TableHead>
+                          <TableHead className="text-right">{t("overview.cache")}</TableHead>
+                          <TableHead className="text-right">{t("overview.hitRate")}</TableHead>
+                          <TableHead className="text-right">{t("overview.cost")}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <VirtualTableBody
@@ -780,7 +787,7 @@ export default function App() {
                   }))
                 }
               >
-                <option value="">All agents</option>
+                <option value="">{t("records.allAgents")}</option>
                 {agents.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
@@ -798,7 +805,7 @@ export default function App() {
                   }))
                 }
               >
-                <option value="">All models</option>
+                <option value="">{t("records.allModels")}</option>
                 {filterModels.map((m) => (
                   <option key={m} value={m}>
                     {m}
@@ -843,7 +850,7 @@ export default function App() {
                   }))
                 }
               >
-                <option value="">All projects</option>
+                <option value="">{t("records.allProjects")}</option>
                 {filterProjects.map((p) => (
                   <option key={p} value={p}>
                     {p}
@@ -864,12 +871,16 @@ export default function App() {
                   })
                 }
               >
-                Reset
+                {t("actions.reset")}
               </Button>
 
               <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
                 <span>
-                  {formatNumber(offset + 1)}-{formatNumber(Math.min(offset + PAGE_SIZE, recordCount))} of {formatNumber(recordCount)}
+                  {t("records.rangeOf", {
+                    from: formatNumber(offset + 1),
+                    to: formatNumber(Math.min(offset + PAGE_SIZE, recordCount)),
+                    total: formatNumber(recordCount),
+                  })}
                 </span>
                 <Button
                   variant="outline"
@@ -877,7 +888,7 @@ export default function App() {
                   disabled={offset === 0}
                   onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
                 >
-                  Prev
+                  {t("actions.prev")}
                 </Button>
                 <span className="font-medium">
                   {currentPage} / {totalPages}
@@ -888,7 +899,7 @@ export default function App() {
                   disabled={offset + PAGE_SIZE >= recordCount}
                   onClick={() => setOffset((o) => o + PAGE_SIZE)}
                 >
-                  Next
+                  {t("actions.next")}
                 </Button>
               </div>
             </div>
@@ -899,14 +910,14 @@ export default function App() {
                   <Table>
                     <TableHeader className="sticky top-0 z-20 shadow-sm [&_th]:sticky [&_th]:top-0 [&_th]:z-20">
                       <TableRow>
-                        <TableHead className="w-36">Time</TableHead>
-                        <TableHead className="w-24">Agent</TableHead>
-                        <TableHead className="w-48">Model</TableHead>
-                        <TableHead className="text-right">Input</TableHead>
-                        <TableHead className="text-right">Output</TableHead>
-                        <TableHead className="text-right">Cache</TableHead>
-                        <TableHead className="text-right">Reason</TableHead>
-                        <TableHead className="text-right">Cost</TableHead>
+                        <TableHead className="w-36">{t("records.time")}</TableHead>
+                        <TableHead className="w-24">{t("overview.agent")}</TableHead>
+                        <TableHead className="w-48">{t("overview.model")}</TableHead>
+                        <TableHead className="text-right">{t("overview.input")}</TableHead>
+                        <TableHead className="text-right">{t("overview.output")}</TableHead>
+                        <TableHead className="text-right">{t("overview.cache")}</TableHead>
+                        <TableHead className="text-right">{t("records.reason")}</TableHead>
+                        <TableHead className="text-right">{t("overview.cost")}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <VirtualTableBody
@@ -934,9 +945,9 @@ export default function App() {
                           </TableCell>
                           <TableCell
                             className="max-w-[200px] truncate"
-                            title={r.model || "<unknown>"}
+                            title={r.model || t("records.unknown")}
                           >
-                            {r.model?.trim() ? r.model : "<unknown>"}
+                            {r.model?.trim() ? r.model : t("records.unknown")}
                           </TableCell>
                           <TableCell className="text-right text-xs tabular-nums">
                             {formatTokens(r.inputTokens)}
@@ -985,23 +996,23 @@ export default function App() {
             className="mt-0 flex h-full min-h-0 flex-1 flex-col gap-3 data-[state=inactive]:hidden"
           >
             <div className="flex shrink-0 items-center justify-between gap-2">
-              <span className="text-sm font-semibold">Settings</span>
+              <span className="text-sm font-semibold">{t("settings.title")}</span>
               <div className="flex gap-2">
                 {settingsEditing ? (
                   <>
                     <Button size="sm" variant="ghost" onClick={cancelSettingsEdit}>
                       <X className="mr-1 h-3.5 w-3.5" />
-                      Cancel
+                      {t("actions.cancel")}
                     </Button>
                     <Button size="sm" onClick={() => void saveSettingsEdit()}>
                       <Save className="mr-1 h-3.5 w-3.5" />
-                      Save
+                      {t("actions.save")}
                     </Button>
                   </>
                 ) : (
                   <Button size="sm" variant="outline" onClick={enterSettingsEdit}>
                     <Pencil className="mr-1 h-3.5 w-3.5" />
-                    Edit
+                    {t("actions.edit")}
                   </Button>
                 )}
               </div>
@@ -1010,16 +1021,16 @@ export default function App() {
             <div className="min-h-0 flex-1 space-y-3 overflow-auto">
               <Card>
                 <CardHeader className="py-2">
-                  <CardTitle className="text-sm">Agents</CardTitle>
+                  <CardTitle className="text-sm">{t("settings.agents")}</CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Agent</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Enabled</TableHead>
-                        <TableHead>Path</TableHead>
+                        <TableHead>{t("overview.agent")}</TableHead>
+                        <TableHead>{t("settings.status")}</TableHead>
+                        <TableHead>{t("settings.enabled")}</TableHead>
+                        <TableHead>{t("settings.path")}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1039,7 +1050,9 @@ export default function App() {
                                 variant={a.detected ? "default" : "secondary"}
                                 className="text-[10px]"
                               >
-                                {a.detected ? "Detected" : "Missing"}
+                                {a.detected
+                                  ? t("settings.detected")
+                                  : t("settings.missing")}
                               </Badge>
                             </TableCell>
                             <TableCell>
@@ -1063,7 +1076,7 @@ export default function App() {
                                 />
                               ) : (
                                 <span className="text-xs text-muted-foreground">
-                                  {enabled ? "On" : "Off"}
+                                  {enabled ? t("actions.on") : t("actions.off")}
                                 </span>
                               )}
                             </TableCell>
@@ -1108,11 +1121,11 @@ export default function App() {
 
               <Card>
                 <CardHeader className="py-2">
-                  <CardTitle className="text-sm">Auto Refresh</CardTitle>
+                  <CardTitle className="text-sm">{t("settings.autoRefresh")}</CardTitle>
                 </CardHeader>
                 <CardContent className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Balance interval</Label>
+                    <Label className="text-xs">{t("settings.balanceInterval")}</Label>
                     {settingsEditing && settingsDraft ? (
                       <select
                         className="h-8 w-full rounded-md border bg-background px-2 text-xs"
@@ -1124,22 +1137,24 @@ export default function App() {
                           })
                         }
                       >
-                        <option value={0}>Off</option>
-                        <option value={5}>5 min</option>
-                        <option value={15}>15 min</option>
-                        <option value={30}>30 min</option>
-                        <option value={60}>60 min</option>
+                        <option value={0}>{t("actions.off")}</option>
+                        <option value={5}>{t("settings.min5")}</option>
+                        <option value={15}>{t("settings.min15")}</option>
+                        <option value={30}>{t("settings.min30")}</option>
+                        <option value={60}>{t("settings.min60")}</option>
                       </select>
                     ) : (
                       <p className="text-sm tabular-nums">
                         {(settings?.balanceRefreshMinutes ?? 0) === 0
-                          ? "Off"
-                          : `${settings?.balanceRefreshMinutes ?? 15} min`}
+                          ? t("actions.off")
+                          : locale === "zh-CN"
+                            ? `${settings?.balanceRefreshMinutes ?? 15} 分钟`
+                            : `${settings?.balanceRefreshMinutes ?? 15} min`}
                       </p>
                     )}
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Usage scan interval</Label>
+                    <Label className="text-xs">{t("settings.usageInterval")}</Label>
                     {settingsEditing && settingsDraft ? (
                       <select
                         className="h-8 w-full rounded-md border bg-background px-2 text-xs"
@@ -1151,17 +1166,21 @@ export default function App() {
                           })
                         }
                       >
-                        <option value={0}>Off</option>
-                        <option value={15}>15 min</option>
-                        <option value={30}>30 min</option>
-                        <option value={60}>60 min</option>
-                        <option value={120}>2 hours</option>
+                        <option value={0}>{t("actions.off")}</option>
+                        <option value={15}>{t("settings.min15")}</option>
+                        <option value={30}>{t("settings.min30")}</option>
+                        <option value={60}>{t("settings.min60")}</option>
+                        <option value={120}>
+                          {locale === "zh-CN" ? "2 小时" : "2 hours"}
+                        </option>
                       </select>
                     ) : (
                       <p className="text-sm tabular-nums">
                         {(settings?.usageRefreshMinutes ?? 0) === 0
-                          ? "Off"
-                          : `${settings?.usageRefreshMinutes ?? 30} min`}
+                          ? t("actions.off")
+                          : locale === "zh-CN"
+                            ? `${settings?.usageRefreshMinutes ?? 30} 分钟`
+                            : `${settings?.usageRefreshMinutes ?? 30} min`}
                       </p>
                     )}
                   </div>
@@ -1170,7 +1189,23 @@ export default function App() {
 
               <Card>
                 <CardHeader className="py-2">
-                  <CardTitle className="text-sm">Model Overrides</CardTitle>
+                  <CardTitle className="text-sm">{t("settings.language")}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <select
+                    className="h-8 w-full max-w-xs rounded-md border bg-background px-2 text-xs"
+                    value={locale}
+                    onChange={(e) => setLocale(e.target.value as Locale)}
+                  >
+                    <option value="zh-CN">{t("settings.langZh")}</option>
+                    <option value="en">{t("settings.langEn")}</option>
+                  </select>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="py-2">
+                  <CardTitle className="text-sm">{t("settings.modelOverrides")}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <ModelOverridesEditor
