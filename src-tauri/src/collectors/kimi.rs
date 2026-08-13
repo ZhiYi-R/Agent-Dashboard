@@ -865,9 +865,12 @@ mod tests {
 
     #[test]
     fn extracts_session_and_agent() {
-        let p = PathBuf::from(
-            r"C:\Users\x\.kimi-code\sessions\wd_foo_abc\session_e4e2aab9-0ec6-4887-9880-cac6c72ff01c\agents\main\wire.jsonl",
-        );
+        let p = PathBuf::from("sessions")
+            .join("wd_foo_abc")
+            .join("session_e4e2aab9-0ec6-4887-9880-cac6c72ff01c")
+            .join("agents")
+            .join("main")
+            .join("wire.jsonl");
         assert_eq!(
             extract_session_id(&p).as_deref(),
             Some("session_e4e2aab9-0ec6-4887-9880-cac6c72ff01c")

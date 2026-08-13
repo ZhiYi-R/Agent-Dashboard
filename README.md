@@ -88,10 +88,9 @@ npm run tauri build
 | `claude` | Claude Code | `~/.claude/projects` | 会话 JSONL |
 | `codex` | OpenAI Codex | `~/.codex/sessions` | `rollout-*.jsonl`（`token_count`） |
 | `kimi` | Kimi Code | `~/.kimi-code/sessions`，并兼容 `~/.kimi/sessions`、`%APPDATA%\Kimi Code\sessions` | `wire.jsonl` + `session_index.jsonl` + `config.toml` 模型映射 |
-| `opencode` | OpenCode | `~/.local/share/opencode/opencode.db` | SQLite |
+| `opencode` | OpenCode | `$XDG_DATA_HOME/opencode/opencode.db`，未设置时为 `~/.local/share/opencode/opencode.db` | SQLite |
 | `zcode` | ZCode | 项目内约定路径 | SQLite 等 |
 | `zed` | Zed Agent | Windows：`%LOCALAPPDATA%\Zed\threads\threads.db` | zstd/JSON 线程库 |
-| `devin` / `devin_desktop` | Devin | 本机会话库 | 只读 SQLite |
 
 各 Collector 实现见 `src-tauri/src/collectors/`。
 

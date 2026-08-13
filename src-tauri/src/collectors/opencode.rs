@@ -1,10 +1,11 @@
-use super::{ensure_model, resolve_path, should_scan_source, Collector, FilePlanner};
+use super::{ensure_model, home_dir, resolve_path, should_scan_source, Collector, FilePlanner};
 use crate::models::{AppSettings, UsageRecord};
 use crate::pricing::PriceCache;
 use anyhow::Context;
 use chrono::{TimeZone, Utc};
 use rusqlite::OpenFlags;
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 pub struct OpenCodeCollector;
 
@@ -16,7 +17,7 @@ impl Collector for OpenCodeCollector {
         "OpenCode"
     }
     fn default_path(&self) -> Option<String> {
-        Some("~/.local/share/opencode/opencode.db".to_string())
+        opencode_db_path().map(|path| path.to_string_lossy().into_owned())
     }
 
     fn collect(
@@ -96,6 +97,23 @@ impl Collector for OpenCodeCollector {
     }
 }
 
+fn opencode_db_path() -> Option<PathBuf> {
+    opencode_data_dir().map(|dir| dir.join("opencode").join("opencode.db"))
+}
+
+fn opencode_data_dir() -> Option<PathBuf> {
+    let xdg_data_home = std::env::var_os("XDG_DATA_HOME");
+    let home = home_dir();
+    opencode_data_dir_from(xdg_data_home.as_deref().map(Path::new), home.as_deref())
+}
+
+fn opencode_data_dir_from(xdg_data_home: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+    xdg_data_home
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .or_else(|| home.map(|path| path.join(".local").join("share")))
+}
+
 fn parse_model_json(json: Option<&str>) -> (String, Option<String>) {
     let Some(s) = json else {
         return (String::new(), None);
@@ -115,4 +133,30 @@ fn parse_model_json(json: Option<&str>) -> (String, Option<String>) {
         .map(|s| s.to_string())
         .unwrap_or_default();
     (model, provider)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefers_custom_xdg_data_home() {
+        let path = opencode_data_dir_from(
+            Some(Path::new("/custom/data")),
+            Some(Path::new("/home/tester")),
+        );
+        assert_eq!(path, Some(PathBuf::from("/custom/data")));
+    }
+
+    #[test]
+    fn falls_back_to_home_local_share() {
+        let path = opencode_data_dir_from(None, Some(Path::new("/home/tester")));
+        assert_eq!(path, Some(PathBuf::from("/home/tester/.local/share")));
+    }
+
+    #[test]
+    fn ignores_empty_xdg_data_home() {
+        let path = opencode_data_dir_from(Some(Path::new("")), Some(Path::new("/home/tester")));
+        assert_eq!(path, Some(PathBuf::from("/home/tester/.local/share")));
+    }
 }

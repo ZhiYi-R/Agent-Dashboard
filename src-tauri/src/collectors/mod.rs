@@ -4,8 +4,6 @@ use anyhow::Result;
 
 pub mod claude;
 pub mod codex;
-pub mod devin;
-pub mod devin_desktop;
 pub mod kimi;
 pub mod opencode;
 pub mod zcode;
@@ -104,8 +102,6 @@ pub fn all_collectors() -> Vec<Box<dyn Collector>> {
         Box::new(zcode::ZCodeCollector),
         Box::new(opencode::OpenCodeCollector),
         Box::new(kimi::KimiCollector),
-        Box::new(devin::DevinCollector),
-        Box::new(devin_desktop::DevinDesktopCollector),
         Box::new(zed::ZedCollector),
     ]
 }
