@@ -94,7 +94,8 @@ export type BalanceProviderType =
   | "kimi-code"
   | "bigmodel-coding"
   | "zai-coding"
-  | "deepseek";
+  | "deepseek"
+  | "opencode-go";
 
 export interface BalanceKey {
   id: string;
@@ -224,5 +225,11 @@ export const BALANCE_PROVIDER_META: Record<
     needsBaseUrl: false,
     defaultBaseUrl: "https://api.deepseek.com",
     keyHint: "sk-...",
+  },
+  "opencode-go": {
+    label: "OpenCode Go",
+    needsBaseUrl: false,
+    defaultBaseUrl: "https://opencode.ai/zen/go/v1",
+    keyHint: "opencode auth token",
   },
 };

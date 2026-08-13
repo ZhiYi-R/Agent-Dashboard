@@ -56,6 +56,7 @@ fn query(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceResult> 
         }
         BalanceProviderType::ZaiCoding => query_zhipu_monitor("https://api.z.ai", provider, key),
         BalanceProviderType::Deepseek => query_deepseek(provider, key),
+        BalanceProviderType::OpencodeGo => query_opencode_go(provider, key),
     }
 }
 
@@ -547,6 +548,65 @@ fn query_deepseek(provider: &BalanceProvider, key: &BalanceKey) -> Result<Balanc
             return Err(anyhow!("{}", r.message));
         }
     }
+    Ok(r)
+}
+
+fn query_opencode_go(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceResult> {
+    let base = provider
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("https://opencode.ai/zen/go/v1")
+        .trim_end_matches('/');
+    let url = format!("{}/usage", base);
+    let (_status, json) = http_get_json(&url, &key.key)?;
+
+    let mut r = empty_result();
+    r.raw = Some(json.clone());
+
+    // {"usage":{"rolling":{"status":"ok","percent":5,"resetsAt":"..."},
+    //            "weekly":{...},"monthly":{...}}}
+    let usage = json.get("usage");
+    let mut parts: Vec<String> = Vec::new();
+    for (name, title) in [
+        ("rolling", "Rolling"),
+        ("weekly", "Weekly"),
+        ("monthly", "Monthly"),
+    ] {
+        let Some(w) = usage.and_then(|u| u.get(name)) else {
+            continue;
+        };
+        let status = w.get("status").and_then(|v| v.as_str()).unwrap_or("ok");
+        let percent = num_f64(w, &["percent"]);
+        let reset_at = w
+            .get("resetsAt")
+            .or_else(|| w.get("resets_at"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        r.windows.push(BalanceWindow {
+            name: title.to_string(),
+            used_percent: percent,
+            remaining: percent.map(|p| 100.0 - p),
+            total: Some(100.0),
+            unit: Some("%".into()),
+            reset_at,
+        });
+        match percent {
+            Some(p) => parts.push(format!("{} {:.0}% used", title, p)),
+            None if status != "ok" => parts.push(format!("{} {}", title, status)),
+            _ => {}
+        }
+    }
+
+    r.message = if r.windows.is_empty() {
+        "unexpected response shape".into()
+    } else if parts.is_empty() {
+        "ok".into()
+    } else {
+        parts.join(" · ")
+    };
     Ok(r)
 }
 

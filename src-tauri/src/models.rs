@@ -124,6 +124,7 @@ pub enum BalanceProviderType {
     BigmodelCoding,
     ZaiCoding,
     Deepseek,
+    OpencodeGo,
 }
 
 impl BalanceProviderType {
@@ -136,6 +137,7 @@ impl BalanceProviderType {
             Self::BigmodelCoding => "bigmodel-coding",
             Self::ZaiCoding => "zai-coding",
             Self::Deepseek => "deepseek",
+            Self::OpencodeGo => "opencode-go",
         }
     }
 }
