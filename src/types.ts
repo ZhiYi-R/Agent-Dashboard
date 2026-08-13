@@ -190,7 +190,7 @@ export const BALANCE_PROVIDER_META: Record<
   newapi: {
     label: "NewAPI",
     needsBaseUrl: true,
-    keyHint: "sk-...",
+    keyHint: "管理令牌 (Bearer)",
   },
   sub2api: {
     label: "Sub2API",

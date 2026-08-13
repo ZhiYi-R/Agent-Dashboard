@@ -46,9 +46,8 @@ fn query(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceResult> 
         return Err(anyhow!("API key is empty"));
     }
     match provider.provider_type {
-        BalanceProviderType::Newapi | BalanceProviderType::ClaudeCodeHub => {
-            query_newapi_like(provider, key)
-        }
+        BalanceProviderType::Newapi => query_newapi(provider, key),
+        BalanceProviderType::ClaudeCodeHub => query_claude_code_hub(provider, key),
         BalanceProviderType::Sub2api => query_sub2api(provider, key),
         BalanceProviderType::KimiCode => query_kimi_code(provider, key),
         BalanceProviderType::BigmodelCoding => {
@@ -119,8 +118,81 @@ fn empty_result() -> BalanceResult {
     }
 }
 
-/// NewAPI / Claude Code Hub (probe NewAPI-compatible path)
-fn query_newapi_like(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceResult> {
+/// NewAPI: OpenAI-SDK-compatible billing endpoints (dashboard billing panel).
+/// Auth: instance admin token (or user token) as Bearer.
+fn query_newapi(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceResult> {
+    let base = require_base_url(provider)?;
+
+    // usage: {"object":"list","total_usage":2500.0} — unit is $0.01
+    let usage_url = format!("{}/v1/dashboard/billing/usage", base);
+    let (_status, usage_json) = http_get_json(&usage_url, &key.key)?;
+    // subscription: {"object":"billing_subscription","hard_limit_usd":100.0,...,
+    //                "access_until":1640995200}
+    let sub_url = format!("{}/v1/dashboard/billing/subscription", base);
+    let (_status, sub_json) = http_get_json(&sub_url, &key.key)?;
+
+    if let Some(msg) = usage_json.pointer("/error/message").and_then(|v| v.as_str()) {
+        return Err(anyhow!("usage: {}", msg));
+    }
+    if let Some(msg) = sub_json.pointer("/error/message").and_then(|v| v.as_str()) {
+        return Err(anyhow!("subscription: {}", msg));
+    }
+
+    let used_usd = num_f64(&usage_json, &["total_usage", "totalUsage"]).map(|u| u / 100.0);
+    let limit_usd = num_f64(&sub_json, &["hard_limit_usd", "hardLimitUsd"])
+        .or_else(|| num_f64(&sub_json, &["soft_limit_usd", "softLimitUsd"]))
+        .or_else(|| num_f64(&sub_json, &["system_hard_limit_usd", "systemHardLimitUsd"]));
+    let access_until = sub_json
+        .get("access_until")
+        .or_else(|| sub_json.get("accessUntil"))
+        .and_then(ts_to_string);
+
+    let available = match (limit_usd, used_usd) {
+        (Some(l), Some(u)) => Some((l - u).max(0.0)),
+        (Some(l), None) => Some(l),
+        _ => None,
+    };
+
+    let mut r = empty_result();
+    r.raw = Some(serde_json::json!({
+        "usage": usage_json,
+        "subscription": sub_json,
+    }));
+    r.available = available;
+    r.total = limit_usd;
+    r.currency = Some("USD".into());
+
+    if let (Some(a), Some(l)) = (available, limit_usd) {
+        r.windows.push(BalanceWindow {
+            name: "Wallet".into(),
+            used_percent: None,
+            remaining: Some(a),
+            total: Some(l),
+            unit: Some("USD".into()),
+            reset_at: access_until.clone(),
+        });
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(u) = used_usd {
+        parts.push(format!("used ${:.2}", u));
+    }
+    if let Some(l) = limit_usd {
+        parts.push(format!("limit ${:.2}", l));
+    }
+    if let Some(a) = access_until {
+        parts.push(format!("expires {}", a));
+    }
+    r.message = if parts.is_empty() {
+        "ok".into()
+    } else {
+        parts.join(" · ")
+    };
+    Ok(r)
+}
+
+/// Claude Code Hub (probe NewAPI-compatible token usage path)
+fn query_claude_code_hub(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceResult> {
     let base = require_base_url(provider)?;
     let url = format!("{}/api/usage/token", base);
     let (_status, json) = http_get_json(&url, &key.key)?;
