@@ -101,6 +101,8 @@ export interface BalanceKey {
   id: string;
   name: string;
   key: string;
+  /** NewAPI `New-Api-User` header value (required for the dashboard billing API). */
+  userId?: string;
 }
 
 export interface BalanceProvider {
@@ -185,12 +187,19 @@ export interface ModelPrice {
 
 export const BALANCE_PROVIDER_META: Record<
   BalanceProviderType,
-  { label: string; needsBaseUrl: boolean; defaultBaseUrl?: string; keyHint: string }
+  {
+    label: string;
+    needsBaseUrl: boolean;
+    defaultBaseUrl?: string;
+    keyHint: string;
+    needsUserId?: boolean;
+  }
 > = {
   newapi: {
     label: "NewAPI",
     needsBaseUrl: true,
     keyHint: "管理令牌 (Bearer)",
+    needsUserId: true,
   },
   sub2api: {
     label: "Sub2API",

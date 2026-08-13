@@ -70,18 +70,28 @@ fn require_base_url(provider: &BalanceProvider) -> Result<String> {
 }
 
 fn http_get_json(url: &str, bearer: &str) -> Result<(u16, Value)> {
+    http_get_json_extra(url, bearer, &[])
+}
+
+fn http_get_json_extra(
+    url: &str,
+    bearer: &str,
+    extra_headers: &[(&str, &str)],
+) -> Result<(u16, Value)> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .context("build http client")?;
 
-    let resp = client
+    let mut req = client
         .get(url)
         .header("Authorization", format!("Bearer {}", bearer.trim()))
         .header("Accept", "application/json")
-        .header("Content-Type", "application/json")
-        .send()
-        .with_context(|| format!("request {}", url))?;
+        .header("Content-Type", "application/json");
+    for (name, value) in extra_headers {
+        req = req.header(*name, *value);
+    }
+    let resp = req.send().with_context(|| format!("request {}", url))?;
 
     let status = resp.status().as_u16();
     let text = resp.text().unwrap_or_default();
@@ -119,17 +129,24 @@ fn empty_result() -> BalanceResult {
 }
 
 /// NewAPI: OpenAI-SDK-compatible billing endpoints (dashboard billing panel).
-/// Auth: instance admin token (or user token) as Bearer.
+/// Auth: instance admin token (or user token) as Bearer + `New-Api-User` header.
 fn query_newapi(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceResult> {
     let base = require_base_url(provider)?;
+    let user_id = key
+        .user_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("NewAPI requires user ID (New-Api-User header)"))?;
+    let headers = [("New-Api-User", user_id)];
 
     // usage: {"object":"list","total_usage":2500.0} — unit is $0.01
     let usage_url = format!("{}/v1/dashboard/billing/usage", base);
-    let (_status, usage_json) = http_get_json(&usage_url, &key.key)?;
+    let (_status, usage_json) = http_get_json_extra(&usage_url, &key.key, &headers)?;
     // subscription: {"object":"billing_subscription","hard_limit_usd":100.0,...,
     //                "access_until":1640995200}
     let sub_url = format!("{}/v1/dashboard/billing/subscription", base);
-    let (_status, sub_json) = http_get_json(&sub_url, &key.key)?;
+    let (_status, sub_json) = http_get_json_extra(&sub_url, &key.key, &headers)?;
 
     if let Some(msg) = usage_json.pointer("/error/message").and_then(|v| v.as_str()) {
         return Err(anyhow!("usage: {}", msg));

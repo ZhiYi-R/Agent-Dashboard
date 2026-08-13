@@ -367,6 +367,11 @@ export function BalanceTab({
               t("balance.emptyKey", { provider: p.name, key: k.name })
             );
           }
+          if (meta.needsUserId && !k.userId?.trim()) {
+            throw new Error(
+              t("balance.userIdRequiredErr", { provider: p.name, key: k.name })
+            );
+          }
         }
       }
       const next: AppSettings = {
@@ -411,7 +416,10 @@ export function BalanceTab({
         p.id === providerId
           ? {
               ...p,
-              keys: [...p.keys, { id: uid("bk"), name: "Key", key: "" }],
+              keys: [
+                ...p.keys,
+                { id: uid("bk"), name: "Key", key: "", userId: "" },
+              ],
             }
           : p
       )
@@ -712,6 +720,18 @@ export function BalanceTab({
                             <p className="font-mono text-[10px] text-muted-foreground">
                               {maskKey(k.key)}
                             </p>
+                          )}
+                          {meta.needsUserId && (
+                            <Input
+                              className="h-8 font-mono text-xs"
+                              placeholder={t("balance.userIdPlaceholder")}
+                              value={k.userId ?? ""}
+                              onChange={(e) =>
+                                updateKey(p.id, k.id, {
+                                  userId: e.target.value || undefined,
+                                })
+                              }
+                            />
                           )}
                         </div>
                         <Button

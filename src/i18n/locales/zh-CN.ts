@@ -91,6 +91,8 @@ export type MessageTree = {
     keyPlaceholder: string;
     emptyKey: string;
     baseUrlRequiredErr: string;
+    userIdPlaceholder: string;
+    userIdRequiredErr: string;
   };
   modelOverrides: {
     model: string;
@@ -213,6 +215,8 @@ const zhCN: MessageTree = {
     keyPlaceholder: "名称",
     emptyKey: "{provider} / {key}: 密钥为空",
     baseUrlRequiredErr: "{name}: 需要填写 Base URL",
+    userIdPlaceholder: "用户 ID (New-Api-User)",
+    userIdRequiredErr: "{provider} / {key}: 需要填写用户 ID",
   },
   modelOverrides: {
     model: "模型",

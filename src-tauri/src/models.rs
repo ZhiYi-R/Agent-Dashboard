@@ -148,6 +148,9 @@ pub struct BalanceKey {
     pub id: String,
     pub name: String,
     pub key: String,
+    /// NewAPI `New-Api-User` header value (required for the dashboard billing API).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

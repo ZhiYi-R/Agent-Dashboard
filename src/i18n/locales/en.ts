@@ -110,6 +110,8 @@ const en = {
     keyPlaceholder: "Name",
     emptyKey: "{provider} / {key}: empty key",
     baseUrlRequiredErr: "{name}: Base URL required",
+    userIdPlaceholder: "User ID (New-Api-User)",
+    userIdRequiredErr: "{provider} / {key}: user ID required",
   },
   modelOverrides: {
     model: "Model",
