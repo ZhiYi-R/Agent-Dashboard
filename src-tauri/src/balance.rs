@@ -169,75 +169,69 @@ fn query_newapi_like(provider: &BalanceProvider, key: &BalanceKey) -> Result<Bal
 
 fn query_sub2api(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceResult> {
     let base = require_base_url(provider)?;
-    let url = format!("{}/backend-api/wham/usage", base);
+    let url = format!("{}/v1/usage", base);
     let (_status, json) = http_get_json(&url, &key.key)?;
 
     let mut r = empty_result();
     r.raw = Some(json.clone());
 
-    // Prefer sub2api extension object when present
-    if let Some(s2) = json.get("sub2api") {
-        r.available = num_f64(s2, &["daily_remaining_usd", "dailyRemainingUsd"]);
-        r.total = num_f64(s2, &["daily_limit_usd", "dailyLimitUsd"]);
-        r.currency = Some("USD".into());
-        let used = num_f64(s2, &["daily_used_usd", "dailyUsedUsd"]);
-        let wallet = num_f64(s2, &["wallet_balance_usd", "walletBalanceUsd"]);
-        let reset = s2
-            .get("reset_at")
-            .or_else(|| s2.get("resetAt"))
-            .and_then(ts_to_string);
+    if json.get("isValid").and_then(|v| v.as_bool()) == Some(false) {
+        return Err(anyhow!("invalid token / key not valid"));
+    }
 
+    // {"balance":504.94,"remaining":504.94,"unit":"USD","planName":"钱包余额",
+    //  "usage":{"today":{...},"total":{...}},"daily_usage":[...],"model_stats":[...]}
+    let unit = json
+        .get("unit")
+        .and_then(|v| v.as_str())
+        .unwrap_or("USD")
+        .to_string();
+    let balance = num_f64(&json, &["balance"]).or_else(|| num_f64(&json, &["remaining"]));
+    let plan = json.get("planName").and_then(|v| v.as_str());
+
+    r.available = balance;
+    r.currency = Some(unit.clone());
+
+    if let Some(b) = balance {
         r.windows.push(BalanceWindow {
-            name: "Daily".into(),
-            used_percent: match (used, r.total) {
-                (Some(u), Some(t)) if t > 0.0 => Some((u / t) * 100.0),
-                _ => None,
-            },
-            remaining: r.available,
-            total: r.total,
-            unit: Some("USD".into()),
-            reset_at: reset,
+            name: "Wallet".into(),
+            used_percent: None,
+            remaining: Some(b),
+            total: None,
+            unit: Some(unit.clone()),
+            reset_at: None,
         });
-        if let Some(w) = wallet {
-            r.windows.push(BalanceWindow {
-                name: "Wallet".into(),
-                used_percent: None,
-                remaining: Some(w),
-                total: None,
-                unit: Some("USD".into()),
-                reset_at: None,
-            });
-            r.message = format!(
-                "daily remaining ${:.2} · wallet ${:.2}",
-                r.available.unwrap_or(0.0),
-                w
-            );
-        } else {
-            r.message = format!("daily remaining ${:.2}", r.available.unwrap_or(0.0));
+    }
+
+    let today = json.pointer("/usage/today");
+    let total = json.pointer("/usage/total");
+    let today_cost = today.and_then(|t| num_f64(t, &["actual_cost", "cost"]));
+    let today_req = today.and_then(|t| num_f64(t, &["requests"]));
+    let total_cost = total.and_then(|t| num_f64(t, &["actual_cost", "cost"]));
+    let cache_hit = total.and_then(|t| num_f64(t, &["cache_hit_rate"]));
+
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(p) = plan {
+        parts.push(format!("plan: {}", p));
+    }
+    if let Some(c) = today_cost {
+        match today_req {
+            Some(n) => parts.push(format!("today ${:.2} ({} req)", c, n as u64)),
+            None => parts.push(format!("today ${:.2}", c)),
         }
-        return Ok(r);
+    }
+    if let Some(c) = total_cost {
+        parts.push(format!("total used ${:.2}", c));
+    }
+    if let Some(h) = cache_hit {
+        parts.push(format!("cache hit {:.1}%", h * 100.0));
     }
 
-    // Fallback: ChatGPT-style rate_limit.primary_window
-    if let Some(pw) = json.pointer("/rate_limit/primary_window") {
-        let used_pct = num_f64(pw, &["used_percent", "usedPercent"]);
-        let reset = pw
-            .get("reset_at")
-            .or_else(|| pw.get("resetAt"))
-            .and_then(ts_to_string);
-        r.windows.push(BalanceWindow {
-            name: "Primary".into(),
-            used_percent: used_pct,
-            remaining: used_pct.map(|p| 100.0 - p),
-            total: Some(100.0),
-            unit: Some("%".into()),
-            reset_at: reset,
-        });
-        r.message = format!("used {:.1}%", used_pct.unwrap_or(0.0));
-        return Ok(r);
-    }
-
-    r.message = "unexpected response shape".into();
+    r.message = if parts.is_empty() {
+        "ok".into()
+    } else {
+        parts.join(" · ")
+    };
     Ok(r)
 }
 
