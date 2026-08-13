@@ -128,8 +128,8 @@ fn empty_result() -> BalanceResult {
     }
 }
 
-/// NewAPI: OpenAI-SDK-compatible billing endpoints (dashboard billing panel).
-/// Auth: instance admin token (or user token) as Bearer + `New-Api-User` header.
+/// NewAPI: GET {base}/api/user/self (one-api/new-api standard user object).
+/// Auth: Bearer token + `New-Api-User` header (required by this deployment).
 fn query_newapi(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceResult> {
     let base = require_base_url(provider)?;
     let user_id = key
@@ -140,83 +140,44 @@ fn query_newapi(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceR
         .ok_or_else(|| anyhow!("NewAPI requires user ID (New-Api-User header)"))?;
     let headers = [("New-Api-User", user_id)];
 
-    let usage_url = format!("{}/v1/dashboard/billing/usage", base);
-    let sub_url = format!("{}/v1/dashboard/billing/subscription", base);
+    let url = format!("{}/api/user/self", base);
+    let (_status, json) = http_get_json_extra(&url, &key.key, &headers)?;
 
-    // Some forks only implement the subscription path; a usage failure is tolerated.
-    let usage_json = http_get_json_extra(&usage_url, &key.key, &headers).ok();
-    let (_status, sub_json) = http_get_json_extra(&sub_url, &key.key, &headers)?;
-
-    if let Some(msg) = sub_json.pointer("/error/message").and_then(|v| v.as_str()) {
-        return Err(anyhow!("subscription: {}", msg));
-    }
-    if let Some(msg) = usage_json
-        .as_ref()
-        .and_then(|(_, j)| j.pointer("/error/message"))
-        .and_then(|v| v.as_str())
-    {
-        return Err(anyhow!("usage: {}", msg));
+    if json.get("success").and_then(|v| v.as_bool()) == Some(false) {
+        let msg = json
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("request failed");
+        return Err(anyhow!("{}", msg));
     }
 
-    // NewAPI quota unit: commonly 500000 = $1 (instance-dependent)
-    const QUOTA_PER_USD: f64 = 500_000.0;
-
-    // Shape A — official OpenAI-compatible billing:
-    //   usage: {"object":"list","total_usage":2500.0} (unit $0.01)
-    //   subscription: {"hard_limit_usd":100.0,"access_until":1640995200}
-    let official_used = usage_json
-        .as_ref()
-        .and_then(|(_, j)| num_f64(j, &["total_usage", "totalUsage"]))
-        .map(|u| u / 100.0);
-    let official_limit = num_f64(&sub_json, &["hard_limit_usd", "hardLimitUsd"])
-        .or_else(|| num_f64(&sub_json, &["soft_limit_usd", "softLimitUsd"]))
-        .or_else(|| num_f64(&sub_json, &["system_hard_limit_usd", "systemHardLimitUsd"]));
-    let access_until = sub_json
-        .get("access_until")
-        .or_else(|| sub_json.get("accessUntil"))
-        .and_then(ts_to_string);
-
-    // Shape B — NewAPI user object:
-    //   {"success":true,"data":{"quota":28384878,"used_quota":64999960,...}}
-    //   one-api semantics: quota = *remaining* quota.
-    let sub_data = sub_json.get("data").unwrap_or(&sub_json);
-    let quota = num_f64(sub_data, &["quota"]);
-    let used_quota = num_f64(sub_data, &["used_quota", "usedQuota"]);
-    let request_count = num_f64(sub_data, &["request_count", "requestCount"]);
-    let display_name = sub_data
+    // {"success":true,"data":{"quota":28384878,"used_quota":64999960,
+    //  "request_count":33654,"display_name":"...",...}}
+    // one-api/new-api semantics: quota = *remaining* quota.
+    let data = json.get("data").unwrap_or(&json);
+    let quota = num_f64(data, &["quota"]);
+    let used_quota = num_f64(data, &["used_quota", "usedQuota"]);
+    let request_count = num_f64(data, &["request_count", "requestCount"]);
+    let display_name = data
         .get("display_name")
-        .or_else(|| sub_data.get("displayName"))
-        .or_else(|| sub_data.get("username"))
+        .or_else(|| data.get("displayName"))
+        .or_else(|| data.get("username"))
         .and_then(|v| v.as_str())
         .filter(|s| !s.trim().is_empty())
         .map(str::to_string);
 
-    let (available, used_usd, limit_usd) = if quota.is_some() {
-        // NewAPI user-object shape
-        let used = used_quota.map(|u| u / QUOTA_PER_USD).or(official_used);
-        let total = match (quota, used) {
-            (Some(q), Some(u)) => Some(q / QUOTA_PER_USD + u),
-            (Some(q), None) => Some(q / QUOTA_PER_USD),
-            _ => None,
-        };
-        (quota.map(|q| q / QUOTA_PER_USD), used, total)
-    } else {
-        // official OpenAI-compatible shape
-        let avail = match (official_limit, official_used) {
-            (Some(l), Some(u)) => Some((l - u).max(0.0)),
-            (Some(l), None) => Some(l),
-            _ => None,
-        };
-        (avail, official_used, official_limit)
+    // NewAPI quota unit: commonly 500000 = $1 (instance-dependent)
+    const QUOTA_PER_USD: f64 = 500_000.0;
+
+    let available = quota.map(|q| q / QUOTA_PER_USD);
+    let used_usd = used_quota.map(|u| u / QUOTA_PER_USD);
+    let limit_usd = match (quota, used_usd) {
+        (Some(q), Some(u)) => Some(q / QUOTA_PER_USD + u),
+        _ => None,
     };
 
     let mut r = empty_result();
-    let mut raw = serde_json::Map::new();
-    if let Some((_, j)) = usage_json.as_ref() {
-        raw.insert("usage".into(), j.clone());
-    }
-    raw.insert("subscription".into(), sub_json);
-    r.raw = Some(serde_json::Value::Object(raw));
+    r.raw = Some(json);
     r.available = available;
     r.total = limit_usd;
     r.currency = Some("USD".into());
@@ -228,7 +189,7 @@ fn query_newapi(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceR
             remaining: Some(a),
             total: Some(l),
             unit: Some("USD".into()),
-            reset_at: access_until.clone(),
+            reset_at: None,
         });
     }
 
@@ -244,9 +205,6 @@ fn query_newapi(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceR
     }
     if let Some(c) = request_count {
         parts.push(format!("{} req", c as u64));
-    }
-    if let Some(a) = access_until {
-        parts.push(format!("expires {}", a));
     }
     r.message = if parts.is_empty() {
         "ok".into()
