@@ -140,23 +140,35 @@ fn query_newapi(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceR
         .ok_or_else(|| anyhow!("NewAPI requires user ID (New-Api-User header)"))?;
     let headers = [("New-Api-User", user_id)];
 
-    // usage: {"object":"list","total_usage":2500.0} — unit is $0.01
     let usage_url = format!("{}/v1/dashboard/billing/usage", base);
-    let (_status, usage_json) = http_get_json_extra(&usage_url, &key.key, &headers)?;
-    // subscription: {"object":"billing_subscription","hard_limit_usd":100.0,...,
-    //                "access_until":1640995200}
     let sub_url = format!("{}/v1/dashboard/billing/subscription", base);
+
+    // Some forks only implement the subscription path; a usage failure is tolerated.
+    let usage_json = http_get_json_extra(&usage_url, &key.key, &headers).ok();
     let (_status, sub_json) = http_get_json_extra(&sub_url, &key.key, &headers)?;
 
-    if let Some(msg) = usage_json.pointer("/error/message").and_then(|v| v.as_str()) {
-        return Err(anyhow!("usage: {}", msg));
-    }
     if let Some(msg) = sub_json.pointer("/error/message").and_then(|v| v.as_str()) {
         return Err(anyhow!("subscription: {}", msg));
     }
+    if let Some(msg) = usage_json
+        .as_ref()
+        .and_then(|(_, j)| j.pointer("/error/message"))
+        .and_then(|v| v.as_str())
+    {
+        return Err(anyhow!("usage: {}", msg));
+    }
 
-    let used_usd = num_f64(&usage_json, &["total_usage", "totalUsage"]).map(|u| u / 100.0);
-    let limit_usd = num_f64(&sub_json, &["hard_limit_usd", "hardLimitUsd"])
+    // NewAPI quota unit: commonly 500000 = $1 (instance-dependent)
+    const QUOTA_PER_USD: f64 = 500_000.0;
+
+    // Shape A — official OpenAI-compatible billing:
+    //   usage: {"object":"list","total_usage":2500.0} (unit $0.01)
+    //   subscription: {"hard_limit_usd":100.0,"access_until":1640995200}
+    let official_used = usage_json
+        .as_ref()
+        .and_then(|(_, j)| num_f64(j, &["total_usage", "totalUsage"]))
+        .map(|u| u / 100.0);
+    let official_limit = num_f64(&sub_json, &["hard_limit_usd", "hardLimitUsd"])
         .or_else(|| num_f64(&sub_json, &["soft_limit_usd", "softLimitUsd"]))
         .or_else(|| num_f64(&sub_json, &["system_hard_limit_usd", "systemHardLimitUsd"]));
     let access_until = sub_json
@@ -164,17 +176,47 @@ fn query_newapi(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceR
         .or_else(|| sub_json.get("accessUntil"))
         .and_then(ts_to_string);
 
-    let available = match (limit_usd, used_usd) {
-        (Some(l), Some(u)) => Some((l - u).max(0.0)),
-        (Some(l), None) => Some(l),
-        _ => None,
+    // Shape B — NewAPI user object:
+    //   {"success":true,"data":{"quota":28384878,"used_quota":64999960,...}}
+    //   one-api semantics: quota = *remaining* quota.
+    let sub_data = sub_json.get("data").unwrap_or(&sub_json);
+    let quota = num_f64(sub_data, &["quota"]);
+    let used_quota = num_f64(sub_data, &["used_quota", "usedQuota"]);
+    let request_count = num_f64(sub_data, &["request_count", "requestCount"]);
+    let display_name = sub_data
+        .get("display_name")
+        .or_else(|| sub_data.get("displayName"))
+        .or_else(|| sub_data.get("username"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string);
+
+    let (available, used_usd, limit_usd) = if quota.is_some() {
+        // NewAPI user-object shape
+        let used = used_quota.map(|u| u / QUOTA_PER_USD).or(official_used);
+        let total = match (quota, used) {
+            (Some(q), Some(u)) => Some(q / QUOTA_PER_USD + u),
+            (Some(q), None) => Some(q / QUOTA_PER_USD),
+            _ => None,
+        };
+        (quota.map(|q| q / QUOTA_PER_USD), used, total)
+    } else {
+        // official OpenAI-compatible shape
+        let avail = match (official_limit, official_used) {
+            (Some(l), Some(u)) => Some((l - u).max(0.0)),
+            (Some(l), None) => Some(l),
+            _ => None,
+        };
+        (avail, official_used, official_limit)
     };
 
     let mut r = empty_result();
-    r.raw = Some(serde_json::json!({
-        "usage": usage_json,
-        "subscription": sub_json,
-    }));
+    let mut raw = serde_json::Map::new();
+    if let Some((_, j)) = usage_json.as_ref() {
+        raw.insert("usage".into(), j.clone());
+    }
+    raw.insert("subscription".into(), sub_json);
+    r.raw = Some(serde_json::Value::Object(raw));
     r.available = available;
     r.total = limit_usd;
     r.currency = Some("USD".into());
@@ -191,11 +233,17 @@ fn query_newapi(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceR
     }
 
     let mut parts: Vec<String> = Vec::new();
+    if let Some(n) = display_name {
+        parts.push(n);
+    }
     if let Some(u) = used_usd {
         parts.push(format!("used ${:.2}", u));
     }
     if let Some(l) = limit_usd {
         parts.push(format!("limit ${:.2}", l));
+    }
+    if let Some(c) = request_count {
+        parts.push(format!("{} req", c as u64));
     }
     if let Some(a) = access_until {
         parts.push(format!("expires {}", a));
