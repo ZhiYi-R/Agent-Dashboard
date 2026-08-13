@@ -112,6 +112,10 @@ const en = {
     baseUrlRequiredErr: "{name}: Base URL required",
     userIdPlaceholder: "User ID (New-Api-User)",
     userIdRequiredErr: "{provider} / {key}: user ID required",
+    manageProviders: "Manage Providers",
+    manageProvidersHint: "Add, edit or remove balance providers. Changes apply after saving.",
+    addProvider: "Add Provider",
+    editProvider: "Edit Provider",
   },
   modelOverrides: {
     model: "Model",

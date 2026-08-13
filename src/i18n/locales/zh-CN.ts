@@ -93,6 +93,10 @@ export type MessageTree = {
     baseUrlRequiredErr: string;
     userIdPlaceholder: string;
     userIdRequiredErr: string;
+    manageProviders: string;
+    manageProvidersHint: string;
+    addProvider: string;
+    editProvider: string;
   };
   modelOverrides: {
     model: string;
@@ -217,6 +221,10 @@ const zhCN: MessageTree = {
     baseUrlRequiredErr: "{name}: 需要填写 Base URL",
     userIdPlaceholder: "用户 ID (New-Api-User)",
     userIdRequiredErr: "{provider} / {key}: 需要填写用户 ID",
+    manageProviders: "管理供应商",
+    manageProvidersHint: "添加、编辑或删除余额供应商，保存后生效。",
+    addProvider: "添加供应商",
+    editProvider: "编辑供应商",
   },
   modelOverrides: {
     model: "模型",
