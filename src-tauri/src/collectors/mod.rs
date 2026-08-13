@@ -135,17 +135,22 @@ pub fn expand_path(path: &str) -> Option<String> {
     }
 
     // Expand leading environment variables like %LOCALAPPDATA%\... or %LOCALAPPDATA%/...
-    let first = path
-        .split("\\")
-        .next()
-        .or_else(|| path.split('/').next())?;
+    let first = path.split("\\").next().or_else(|| path.split('/').next())?;
     if first.starts_with('%') && first.ends_with('%') && first.len() > 2 {
         let var = &first[1..first.len() - 1];
         if let Ok(val) = std::env::var(var) {
             if !val.is_empty() {
                 let rest = path.strip_prefix(first)?;
-                let rest = rest.strip_prefix("\\").or_else(|| rest.strip_prefix('/')).unwrap_or(rest);
-                return Some(std::path::Path::new(&val).join(rest).to_string_lossy().into_owned());
+                let rest = rest
+                    .strip_prefix("\\")
+                    .or_else(|| rest.strip_prefix('/'))
+                    .unwrap_or(rest);
+                return Some(
+                    std::path::Path::new(&val)
+                        .join(rest)
+                        .to_string_lossy()
+                        .into_owned(),
+                );
             }
         }
     }

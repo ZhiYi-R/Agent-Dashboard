@@ -1,4 +1,4 @@
-use super::{ensure_model, should_scan_source, Collector, FilePlanner, resolve_path};
+use super::{ensure_model, resolve_path, should_scan_source, Collector, FilePlanner};
 use crate::models::{AppSettings, UsageRecord};
 use crate::pricing::PriceCache;
 use anyhow::Context;
@@ -48,9 +48,8 @@ impl Collector for ZedCollector {
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
 
-        let mut stmt = conn.prepare(
-            "SELECT id, summary, updated_at, data_type, data FROM threads",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT id, summary, updated_at, data_type, data FROM threads")?;
 
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -92,14 +91,12 @@ impl Collector for ZedCollector {
                 .unwrap_or_else(|_| Utc::now());
 
             let (provider, model) = parse_model(&thread_val);
-            let project = summary
-                .filter(|s| !s.trim().is_empty())
-                .or_else(|| {
-                    thread_val
-                        .get("title")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
-                });
+            let project = summary.filter(|s| !s.trim().is_empty()).or_else(|| {
+                thread_val
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            });
 
             // Per-request map (preferred). Cache fields may be omitted when zero.
             let mut sum_input = 0u64;
@@ -158,9 +155,7 @@ impl Collector for ZedCollector {
             if !cumulative.is_empty() {
                 let rem_input = cumulative.input_tokens.saturating_sub(sum_input);
                 let rem_output = cumulative.output_tokens.saturating_sub(sum_output);
-                let rem_cr = cumulative
-                    .cache_read_tokens
-                    .saturating_sub(sum_cache_read);
+                let rem_cr = cumulative.cache_read_tokens.saturating_sub(sum_cache_read);
                 let rem_cc = cumulative
                     .cache_creation_tokens
                     .saturating_sub(sum_cache_creation);

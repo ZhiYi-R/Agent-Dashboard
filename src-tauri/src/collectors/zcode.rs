@@ -1,4 +1,4 @@
-use super::{ensure_model, should_scan_source, Collector, FilePlanner, resolve_path};
+use super::{ensure_model, resolve_path, should_scan_source, Collector, FilePlanner};
 use crate::models::{AppSettings, UsageRecord};
 use crate::pricing::PriceCache;
 use anyhow::Context;
@@ -64,14 +64,28 @@ impl Collector for ZCodeCollector {
         })?;
 
         for row in rows {
-            let (id, session_id, model_id, input, output, reasoning, cache_creation, cache_read, started, completed, dir) =
-                row?;
+            let (
+                id,
+                session_id,
+                model_id,
+                input,
+                output,
+                reasoning,
+                cache_creation,
+                cache_read,
+                started,
+                completed,
+                dir,
+            ) = row?;
 
             // In ZCode, input_tokens includes cache read/creation. Back them out for fresh input.
             let fresh_input = (input - cache_creation - cache_read).max(0) as u64;
 
             let ts_ms = completed.unwrap_or(started);
-            let ts = Utc.timestamp_millis_opt(ts_ms).single().unwrap_or_else(Utc::now);
+            let ts = Utc
+                .timestamp_millis_opt(ts_ms)
+                .single()
+                .unwrap_or_else(Utc::now);
 
             let mut rec = UsageRecord {
                 id: format!("zcode:{}", id),

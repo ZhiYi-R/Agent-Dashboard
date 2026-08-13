@@ -91,14 +91,19 @@ pub fn list_agents(settings: &AppSettings) -> Vec<AgentDef> {
         .map(|c| {
             let s = settings.agent(c.id());
             let resolved = resolve_path(&s, c.default_path().as_deref());
-            let detected = resolved.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
+            let detected = resolved
+                .as_ref()
+                .map(|p| std::path::Path::new(p).exists())
+                .unwrap_or(false);
             AgentDef {
                 id: c.id().to_string(),
                 name: c.name().to_string(),
                 default_path: c.default_path(),
                 enabled: s.enabled,
                 detected,
-                path: resolved.or_else(|| s.path.clone()).or_else(|| c.default_path()),
+                path: resolved
+                    .or_else(|| s.path.clone())
+                    .or_else(|| c.default_path()),
             }
         })
         .collect()

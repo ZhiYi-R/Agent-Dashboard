@@ -54,9 +54,7 @@ fn query(provider: &BalanceProvider, key: &BalanceKey) -> Result<BalanceResult> 
         BalanceProviderType::BigmodelCoding => {
             query_zhipu_monitor("https://open.bigmodel.cn", provider, key)
         }
-        BalanceProviderType::ZaiCoding => {
-            query_zhipu_monitor("https://api.z.ai", provider, key)
-        }
+        BalanceProviderType::ZaiCoding => query_zhipu_monitor("https://api.z.ai", provider, key),
         BalanceProviderType::Deepseek => query_deepseek(provider, key),
     }
 }
@@ -128,10 +126,7 @@ fn query_newapi_like(provider: &BalanceProvider, key: &BalanceKey) -> Result<Bal
 
     // NewAPI: { code: true, data: { total_granted, total_used, total_available, ... } }
     // Some forks: { success: true, data: ... } or data at top level
-    let data = json
-        .get("data")
-        .cloned()
-        .unwrap_or_else(|| json.clone());
+    let data = json.get("data").cloned().unwrap_or_else(|| json.clone());
 
     let total_granted = num_f64(&data, &["total_granted", "totalGranted"]);
     let total_used = num_f64(&data, &["total_used", "totalUsed"]);
@@ -237,10 +232,7 @@ fn query_sub2api(provider: &BalanceProvider, key: &BalanceKey) -> Result<Balance
             unit: Some("%".into()),
             reset_at: reset,
         });
-        r.message = format!(
-            "used {:.1}%",
-            used_pct.unwrap_or(0.0)
-        );
+        r.message = format!("used {:.1}%", used_pct.unwrap_or(0.0));
         return Ok(r);
     }
 
@@ -410,14 +402,10 @@ fn query_zhipu_monitor(
         r.windows.push(token_limit_window("Monthly", monthly));
     }
 
-    if let Some(mcp) = data
-        .get("limits")
-        .and_then(|v| v.as_array())
-        .and_then(|a| {
-            a.iter()
-                .find(|l| l.get("type").and_then(|t| t.as_str()) == Some("TIME_LIMIT"))
-        })
-    {
+    if let Some(mcp) = data.get("limits").and_then(|v| v.as_array()).and_then(|a| {
+        a.iter()
+            .find(|l| l.get("type").and_then(|t| t.as_str()) == Some("TIME_LIMIT"))
+    }) {
         let remaining = num_f64(mcp, &["remaining"]);
         let total = num_f64(mcp, &["usage"]);
         let used = num_f64(mcp, &["currentValue", "current_value"]);
@@ -437,10 +425,7 @@ fn query_zhipu_monitor(
     let parts: Vec<String> = r
         .windows
         .iter()
-        .filter_map(|w| {
-            w.used_percent
-                .map(|p| format!("{} {:.0}% used", w.name, p))
-        })
+        .filter_map(|w| w.used_percent.map(|p| format!("{} {:.0}% used", w.name, p)))
         .collect();
     r.message = if parts.is_empty() {
         format!("plan: {}", level)
@@ -510,9 +495,14 @@ fn query_deepseek(provider: &BalanceProvider, key: &BalanceKey) -> Result<Balanc
             .and_then(|v| v.as_str())
             .unwrap_or("USD")
             .to_string();
-        let total = parse_money(info.get("total_balance").or_else(|| info.get("totalBalance")));
-        let granted =
-            parse_money(info.get("granted_balance").or_else(|| info.get("grantedBalance")));
+        let total = parse_money(
+            info.get("total_balance")
+                .or_else(|| info.get("totalBalance")),
+        );
+        let granted = parse_money(
+            info.get("granted_balance")
+                .or_else(|| info.get("grantedBalance")),
+        );
         let topped = parse_money(
             info.get("topped_up_balance")
                 .or_else(|| info.get("toppedUpBalance")),

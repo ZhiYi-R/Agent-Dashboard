@@ -1,4 +1,4 @@
-use super::{plan_and_open_jsonl, Collector, FilePlanner, normalize_model, resolve_path};
+use super::{normalize_model, plan_and_open_jsonl, resolve_path, Collector, FilePlanner};
 use crate::models::{AppSettings, UsageRecord};
 use crate::pricing::PriceCache;
 use anyhow::{Context, Result};

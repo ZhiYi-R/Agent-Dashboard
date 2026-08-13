@@ -1,4 +1,4 @@
-use super::{ensure_model, should_scan_source, Collector, FilePlanner, resolve_path};
+use super::{ensure_model, resolve_path, should_scan_source, Collector, FilePlanner};
 use crate::models::{AppSettings, UsageRecord};
 use crate::pricing::PriceCache;
 use anyhow::Context;
@@ -96,7 +96,9 @@ impl Collector for DevinCollector {
                 .unwrap_or_default();
 
             let data = fs::read_to_string(&path)?;
-            let Ok(transcript): Result<Value, _> = serde_json::from_str(&data) else { continue };
+            let Ok(transcript): Result<Value, _> = serde_json::from_str(&data) else {
+                continue;
+            };
 
             let agent_model = transcript
                 .get("agent")
@@ -110,7 +112,11 @@ impl Collector for DevinCollector {
                 .cloned()
                 .unwrap_or((None, None, None, None, None));
 
-            let steps = transcript.get("steps").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let steps = transcript
+                .get("steps")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
 
             for step in steps {
                 if step
@@ -168,7 +174,11 @@ impl Collector for DevinCollector {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
                     .filter(|s| !s.is_empty() && s != "adaptive")
-                    .unwrap_or_else(|| fallback_model.clone().unwrap_or_else(|| agent_model.clone()));
+                    .unwrap_or_else(|| {
+                        fallback_model
+                            .clone()
+                            .unwrap_or_else(|| agent_model.clone())
+                    });
 
                 let ts = step
                     .get("metadata")

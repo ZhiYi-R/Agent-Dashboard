@@ -56,11 +56,7 @@ impl PriceCache {
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()?;
-        let catalog: Catalog = client
-            .get(CATALOG_URL)
-            .send()?
-            .error_for_status()?
-            .json()?;
+        let catalog: Catalog = client.get(CATALOG_URL).send()?.error_for_status()?.json()?;
 
         self.prices.clear();
         for (_, provider) in catalog.providers {
@@ -129,12 +125,19 @@ impl PriceCache {
             self.index.insert(id.to_lowercase(), id.clone());
             // provider/model short forms
             self.index.insert(price.model.to_lowercase(), id.clone());
-            self.index
-                .insert(format!("{}/{}", price.provider, price.model).to_lowercase(), id.clone());
+            self.index.insert(
+                format!("{}/{}", price.provider, price.model).to_lowercase(),
+                id.clone(),
+            );
         }
     }
 
-    pub fn find_price(&self, model: &str, provider_hint: Option<&str>, agent: &str) -> Option<&ModelPrice> {
+    pub fn find_price(
+        &self,
+        model: &str,
+        provider_hint: Option<&str>,
+        agent: &str,
+    ) -> Option<&ModelPrice> {
         let raw = model.to_lowercase().replace(' ', "-");
 
         // Direct hit on full or short id
@@ -178,9 +181,12 @@ impl PriceCache {
 
         // Fallback: look for any price whose model name contains the record model
         for (_id, price) in &self.prices {
-            if price.model.to_lowercase().contains(&raw) || raw.contains(&price.model.to_lowercase())
+            if price.model.to_lowercase().contains(&raw)
+                || raw.contains(&price.model.to_lowercase())
             {
-                if preferred_providers.is_empty() || preferred_providers.contains(&price.provider.as_str()) {
+                if preferred_providers.is_empty()
+                    || preferred_providers.contains(&price.provider.as_str())
+                {
                     return Some(price);
                 }
             }
@@ -189,7 +195,10 @@ impl PriceCache {
         // If a provider hint is given, accept any model from that provider
         if let Some(hint) = provider_hint {
             for (_id, price) in &self.prices {
-                if price.provider == hint.to_lowercase() && (price.model.to_lowercase().contains(&raw) || raw.contains(&price.model.to_lowercase())) {
+                if price.provider == hint.to_lowercase()
+                    && (price.model.to_lowercase().contains(&raw)
+                        || raw.contains(&price.model.to_lowercase()))
+                {
                     return Some(price);
                 }
             }
@@ -237,8 +246,9 @@ impl PriceCache {
                 record.cache_read_tokens as f64 * over.cache_read.unwrap_or(0.0) / 1_000_000.0;
             let cache_creation_cost =
                 record.cache_creation_tokens as f64 * over.cache_write.unwrap_or(0.0) / 1_000_000.0;
-            let reasoning_cost =
-                record.reasoning_tokens as f64 * over.reasoning.unwrap_or(over.output) / 1_000_000.0;
+            let reasoning_cost = record.reasoning_tokens as f64
+                * over.reasoning.unwrap_or(over.output)
+                / 1_000_000.0;
 
             return Some(
                 fresh_cost + output_cost + cache_read_cost + cache_creation_cost + reasoning_cost,

@@ -1,7 +1,9 @@
-use crate::models::{AgentSummary, DaySummary, ModelSummary, RecordFilter, UsageRecord, UsageSummary};
+use crate::models::{
+    AgentSummary, DaySummary, ModelSummary, RecordFilter, UsageRecord, UsageSummary,
+};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, OptionalExtension, OpenFlags};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -101,7 +103,8 @@ impl UsageDb {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )?;
             for r in results {
-                let windows_json = serde_json::to_string(&r.windows).unwrap_or_else(|_| "[]".into());
+                let windows_json =
+                    serde_json::to_string(&r.windows).unwrap_or_else(|_| "[]".into());
                 let raw_json = r
                     .raw
                     .as_ref()
@@ -194,7 +197,11 @@ impl UsageDb {
     }
 
     /// Remove records whose source_file is no longer present in `keep`.
-    pub fn prune_missing_sources(&self, agent: &str, keep: &std::collections::HashSet<String>) -> Result<usize> {
+    pub fn prune_missing_sources(
+        &self,
+        agent: &str,
+        keep: &std::collections::HashSet<String>,
+    ) -> Result<usize> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT source_file FROM records WHERE agent = ?1 AND source_file != ''",
         )?;
@@ -395,9 +402,8 @@ impl UsageDb {
         let mut f = filter.clone();
         f.models = None;
         let (where_sql, params) = build_filter_sql(&f);
-        let sql = format!(
-            "SELECT DISTINCT model FROM records {where_sql} ORDER BY model COLLATE NOCASE"
-        );
+        let sql =
+            format!("SELECT DISTINCT model FROM records {where_sql} ORDER BY model COLLATE NOCASE");
         let mut stmt = self.conn.prepare(&sql)?;
         let param_refs: Vec<&dyn rusqlite::ToSql> =
             params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
@@ -441,8 +447,18 @@ impl UsageDb {
         );
 
         let mut stmt = self.conn.prepare(&total_sql)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
-        let (total_input, total_output, total_cache_read, total_cache_creation, total_reasoning, total_cost, records, sessions) = stmt.query_row(param_refs.as_slice(), |row| {
+        let param_refs: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+        let (
+            total_input,
+            total_output,
+            total_cache_read,
+            total_cache_creation,
+            total_reasoning,
+            total_cost,
+            records,
+            sessions,
+        ) = stmt.query_row(param_refs.as_slice(), |row| {
             Ok((
                 row.get::<_, i64>(0)? as u64,
                 row.get::<_, i64>(1)? as u64,
@@ -480,7 +496,8 @@ impl UsageDb {
         let (where_sql, params) = build_filter_sql(filter);
         let sql = format!("SELECT COUNT(*) FROM records {where_sql}");
         let mut stmt = self.conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+        let param_refs: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
         let count = stmt.query_row(param_refs.as_slice(), |row| row.get::<_, i64>(0))?;
         Ok(count as u64)
     }
@@ -500,7 +517,8 @@ impl UsageDb {
              GROUP BY agent"
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+        let param_refs: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -556,7 +574,8 @@ impl UsageDb {
              GROUP BY model"
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+        let param_refs: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -573,7 +592,17 @@ impl UsageDb {
 
         let mut map = HashMap::new();
         for row in rows {
-            let (model, provider, input, output, cache_read, cache_creation, reasoning, cost, count) = row?;
+            let (
+                model,
+                provider,
+                input,
+                output,
+                cache_read,
+                cache_creation,
+                reasoning,
+                cost,
+                count,
+            ) = row?;
             map.insert(
                 model.clone(),
                 ModelSummary {
@@ -607,7 +636,8 @@ impl UsageDb {
              GROUP BY day"
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+        let param_refs: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
             Ok((
                 row.get::<_, String>(0)?,

@@ -1,5 +1,5 @@
 use super::{
-    ensure_model, plan_and_open_jsonl, Collector, FilePlanner, normalize_model, resolve_path,
+    ensure_model, normalize_model, plan_and_open_jsonl, resolve_path, Collector, FilePlanner,
 };
 use crate::models::{AppSettings, UsageRecord};
 use crate::pricing::PriceCache;
@@ -76,7 +76,9 @@ impl Collector for CodexCollector {
                     Ok(l) => l,
                     Err(_) => continue,
                 };
-                let Ok(val): Result<Value, _> = serde_json::from_str(&line) else { continue };
+                let Ok(val): Result<Value, _> = serde_json::from_str(&line) else {
+                    continue;
+                };
 
                 let ts = val
                     .get("timestamp")
@@ -88,7 +90,10 @@ impl Collector for CodexCollector {
                 match val.get("type").and_then(|v| v.as_str()) {
                     Some("session_meta") => {
                         if let Some(payload) = val.get("payload") {
-                            cwd = payload.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            cwd = payload
+                                .get("cwd")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
                             provider = payload
                                 .get("model_provider")
                                 .and_then(|v| v.as_str())
@@ -106,12 +111,18 @@ impl Collector for CodexCollector {
                         }
                     }
                     Some("event_msg") => {
-                        let Some(payload) = val.get("payload") else { continue };
+                        let Some(payload) = val.get("payload") else {
+                            continue;
+                        };
                         if payload.get("type").and_then(|v| v.as_str()) != Some("token_count") {
                             continue;
                         }
-                        let Some(info) = payload.get("info") else { continue };
-                        let Some(last) = info.get("last_token_usage") else { continue };
+                        let Some(info) = payload.get("info") else {
+                            continue;
+                        };
+                        let Some(last) = info.get("last_token_usage") else {
+                            continue;
+                        };
 
                         // Deduplicate by turn-ish key: session + timestamp + model
                         let dedupe = format!("{}:{}", ts.to_rfc3339(), current_model);

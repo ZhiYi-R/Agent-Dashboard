@@ -208,21 +208,22 @@ fn run_scan(
         let mut planner = |source: &str, mtime_ms: u64, size: u64| -> FileScanPlan {
             seen_for_planner.borrow_mut().insert(source.to_string());
             if force_full {
-                pending_meta.push((source.to_string(), mtime_ms as i64, size as i64, size as i64));
+                pending_meta.push((
+                    source.to_string(),
+                    mtime_ms as i64,
+                    size as i64,
+                    size as i64,
+                ));
                 // Full rescan deletes rows for this source before re-insert.
                 let _ = db.delete_by_source(&agent_id, source);
                 return FileScanPlan::Full;
             }
             match db.get_scan_file(&agent_id, source) {
-                Ok(Some(meta))
-                    if meta.mtime_ms == mtime_ms as i64 && meta.size == size as i64 =>
-                {
+                Ok(Some(meta)) if meta.mtime_ms == mtime_ms as i64 && meta.size == size as i64 => {
                     FileScanPlan::Skip
                 }
                 Ok(Some(meta))
-                    if size as i64 > meta.size
-                        && meta.size >= 0
-                        && source.ends_with(".jsonl") =>
+                    if size as i64 > meta.size && meta.size >= 0 && source.ends_with(".jsonl") =>
                 {
                     // Append-only jsonl growth — tail read, keep existing rows.
                     pending_meta.push((
@@ -238,7 +239,12 @@ fn run_scan(
                 _ => {
                     // New, shrunk, or metadata missing — full file rebuild.
                     let _ = db.delete_by_source(&agent_id, source);
-                    pending_meta.push((source.to_string(), mtime_ms as i64, size as i64, size as i64));
+                    pending_meta.push((
+                        source.to_string(),
+                        mtime_ms as i64,
+                        size as i64,
+                        size as i64,
+                    ));
                     FileScanPlan::Full
                 }
             }
@@ -343,12 +349,20 @@ fn start_sync(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     let app = app.clone();
 
     std::thread::spawn(move || {
-        let _ = app.emit("price-sync-progress", PriceSyncProgress { count: 0, total: 0 });
+        let _ = app.emit(
+            "price-sync-progress",
+            PriceSyncProgress { count: 0, total: 0 },
+        );
 
         let dir = match data_dir(&app) {
             Ok(d) => d,
             Err(e) => {
-                let _ = app.emit("price-sync-error", PriceSyncError { error: e.to_string() });
+                let _ = app.emit(
+                    "price-sync-error",
+                    PriceSyncError {
+                        error: e.to_string(),
+                    },
+                );
                 return;
             }
         };
@@ -357,16 +371,19 @@ fn start_sync(app: AppHandle, state: State<AppState>) -> Result<(), String> {
         match cache.sync() {
             Ok(count) => {
                 if let Err(e) = cache.save(&dir.join("prices.json")) {
-                    let _ = app.emit("price-sync-error", PriceSyncError { error: e.to_string() });
+                    let _ = app.emit(
+                        "price-sync-error",
+                        PriceSyncError {
+                            error: e.to_string(),
+                        },
+                    );
                     return;
                 }
                 // Reprice stored records against the new catalog.
                 if let Ok(db) = UsageDb::open(&dir.join("usage.db")) {
                     // settings are not in this closure — load from app state via path only prices.
                     // Cost uses prices + overrides; load settings.json for overrides.
-                    if let Ok(settings) =
-                        crate::state::load_settings(&dir.join("settings.json"))
-                    {
+                    if let Ok(settings) = crate::state::load_settings(&dir.join("settings.json")) {
                         let _ = recalculate_costs(&db, &cache, &settings);
                     }
                 }
@@ -381,7 +398,12 @@ fn start_sync(app: AppHandle, state: State<AppState>) -> Result<(), String> {
                 let _ = app.emit("price-sync-finished", PriceSyncFinished { count });
             }
             Err(e) => {
-                let _ = app.emit("price-sync-error", PriceSyncError { error: e.to_string() });
+                let _ = app.emit(
+                    "price-sync-error",
+                    PriceSyncError {
+                        error: e.to_string(),
+                    },
+                );
             }
         }
     });

@@ -1,4 +1,4 @@
-use super::{ensure_model, should_scan_source, Collector, FilePlanner, resolve_path};
+use super::{ensure_model, resolve_path, should_scan_source, Collector, FilePlanner};
 use crate::models::{AppSettings, UsageRecord};
 use crate::pricing::PriceCache;
 use anyhow::Context;

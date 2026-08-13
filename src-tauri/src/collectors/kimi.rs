@@ -1,6 +1,4 @@
-use super::{
-    ensure_model, home_dir, plan_and_open_jsonl, Collector, FilePlanner, resolve_path,
-};
+use super::{ensure_model, home_dir, plan_and_open_jsonl, resolve_path, Collector, FilePlanner};
 use crate::models::{AppSettings, UsageRecord};
 use crate::pricing::PriceCache;
 use chrono::{TimeZone, Utc};
@@ -183,8 +181,7 @@ fn parse_kimi_usage(val: &Value) -> Option<ParsedUsage> {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let ts = parse_timestamp(val)
-            .or_else(|| val.get("payload").and_then(parse_timestamp));
+        let ts = parse_timestamp(val).or_else(|| val.get("payload").and_then(parse_timestamp));
 
         return Some(tokens_from_usage(usage, model, ts));
     }
@@ -399,8 +396,7 @@ fn guess_provider(model: &Option<String>) -> String {
         return "moonshotai".to_string();
     };
     let lower = m.to_ascii_lowercase();
-    if lower.contains("moonshot") || lower.starts_with("kimi-code") || lower.starts_with("kimi/")
-    {
+    if lower.contains("moonshot") || lower.starts_with("kimi-code") || lower.starts_with("kimi/") {
         return "moonshotai".to_string();
     }
     if let Some((provider, _)) = m.split_once('/') {
@@ -489,8 +485,7 @@ impl KimiModelCatalog {
                 return;
             }
         }
-        self.by_alias
-            .insert(k, (model_id.to_string(), provider));
+        self.by_alias.insert(k, (model_id.to_string(), provider));
     }
 }
 
@@ -592,10 +587,9 @@ fn merge_kimi_config_models(text: &str, catalog: &mut KimiModelCatalog) {
             tk.clone()
         };
 
-        let prov_out = prov.clone().or_else(|| {
-            tk.split_once('/')
-                .map(|(p, _)| p.to_string())
-        });
+        let prov_out = prov
+            .clone()
+            .or_else(|| tk.split_once('/').map(|(p, _)| p.to_string()));
 
         // Aliases that should resolve to the Model ID
         catalog.insert_alias(&tk, &model_id, prov_out.clone());
