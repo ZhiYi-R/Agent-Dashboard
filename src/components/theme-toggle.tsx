@@ -6,7 +6,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTheme, type Theme } from "@/components/theme-provider";
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Monitor, Moon, Sun, Check } from "lucide-react";
 import { useT } from "@/i18n";
 
 export function ThemeToggle() {
@@ -35,10 +35,20 @@ export function ThemeToggle() {
           <DropdownMenuItem
             key={o.value}
             onClick={() => setTheme(o.value)}
-            className="flex items-center gap-2 text-xs"
+            className={`flex items-center gap-2 pr-7 text-xs ${
+              o.value === theme
+                ? "bg-accent text-accent-foreground"
+                : ""
+            }`}
           >
             <o.icon className="h-3.5 w-3.5" />
             {o.label}
+            <Check
+              className={`absolute right-2 h-3.5 w-3.5 ${
+                o.value === theme ? "opacity-100" : "opacity-0"
+              }`}
+              aria-hidden="true"
+            />
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
