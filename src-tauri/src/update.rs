@@ -26,15 +26,25 @@ struct GhAsset {
     content_type: Option<String>,
 }
 
-/// Parse `1.2.3`, `v1.2.3`, `1.2.3-beta.1` → (major, minor, patch, prerelease_flag)
+/// Normalize `Release-`, optional `v`, and surrounding whitespace from a version string.
+fn normalize_version(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let without_release = trimmed
+        .strip_prefix("Release-")
+        .or_else(|| trimmed.strip_prefix("release-"))
+        .unwrap_or(trimmed);
+    without_release.trim_start_matches(['v', 'V']).to_string()
+}
+
+/// Parse `1.2.3`, `v1.2.3`, `Release-1.2.3`, `1.2.3-beta.1` → (major, minor, patch, prerelease_flag)
 fn parse_semver(raw: &str) -> Option<(u64, u64, u64, bool)> {
-    let s = raw.trim().trim_start_matches('v').trim_start_matches('V');
+    let s = normalize_version(raw);
     if s.is_empty() {
         return None;
     }
     let (core, pre) = match s.split_once(|c| c == '-' || c == '+') {
         Some((c, rest)) => (c, !rest.is_empty()),
-        None => (s, false),
+        None => (s.as_str(), false),
     };
     let mut parts = core.split('.');
     let major = parts.next()?.parse().ok()?;
@@ -152,10 +162,9 @@ pub fn check_latest_release() -> Result<UpdateCheckResult, String> {
         .map(|o| o == std::cmp::Ordering::Greater)
         .unwrap_or(false);
 
-    // If tags are non-semver, fall back to string inequality after normalizing v prefix.
+    // If tags are non-semver, fall back to string inequality after normalizing release prefixes.
     let newer = if parse_semver(&latest_tag).is_none() || parse_semver(&current).is_none() {
-        let norm = |s: &str| s.trim().trim_start_matches(['v', 'V']).to_string();
-        norm(&latest_tag) != norm(&current)
+        normalize_version(&latest_tag) != normalize_version(&current)
     } else {
         newer
     };
@@ -197,6 +206,12 @@ mod tests {
     fn semver_compare() {
         assert_eq!(cmp_version("0.1.0", "0.1.0"), Some(Ordering::Equal));
         assert_eq!(cmp_version("v0.2.0", "0.1.9"), Some(Ordering::Greater));
+        assert_eq!(cmp_version("Release-0.2.0", "0.2.0"), Some(Ordering::Equal));
+        assert_eq!(
+            cmp_version("Release-v0.3.0", "0.2.9"),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(cmp_version("release-0.1.0", "0.1.1"), Some(Ordering::Less));
         assert_eq!(cmp_version("0.1.0", "0.1.1"), Some(Ordering::Less));
         assert_eq!(cmp_version("1.0.0-beta", "1.0.0"), Some(Ordering::Less));
     }

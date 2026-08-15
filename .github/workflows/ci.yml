@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "Release-*"
   pull_request:
     branches:
       - main
@@ -51,6 +53,33 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Validate release version
+        if: github.event_name == 'push' && startsWith(github.ref_name, 'Release-')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          release_version="${RELEASE_TAG#Release-}"
+          release_version="${release_version#v}"
+          if [[ ! "$release_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must use Release-<semver> or Release-v<semver>: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          package_version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          tauri_version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
+          cargo_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' src-tauri/Cargo.toml | head -n 1)"
+
+          for version in "$package_version" "$tauri_version" "$cargo_version"; do
+            if [[ "$version" != "$release_version" ]]; then
+              echo "Release version $release_version does not match project version $version" >&2
+              exit 1
+            fi
+          done
+
+          echo "Validated release version: $release_version"
+
       - name: Build frontend
         run: npm run build
 
@@ -85,15 +114,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: linux-x64
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
           - name: windows-x64
             os: windows-2022
             target: x86_64-pc-windows-msvc
+            bundles: msi,nsis
+          - name: linux-x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
           - name: macos-arm64
             os: macos-14
             target: aarch64-apple-darwin
+            bundles: dmg
 
     steps:
       - name: Check out repository
@@ -106,7 +142,7 @@ jobs:
           cache: npm
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-22.04'
+        if: startsWith(matrix.os, 'ubuntu-')
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
@@ -135,7 +171,7 @@ jobs:
           shared-key: ${{ matrix.target }}
 
       - name: Build Tauri application
-        run: npm run tauri build -- --target "${{ matrix.target }}"
+        run: npm run tauri build -- --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
 
       - name: Upload bundles
         uses: actions/upload-artifact@v4
@@ -144,3 +180,72 @@ jobs:
           path: src-tauri/target/${{ matrix.target }}/release/bundle
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    name: Create GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref_name, 'Release-')
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download platform bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: agent-statistics-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate release assets
+        id: assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t msi < <(find release-assets -type f -iname '*.msi' -print | sort)
+          mapfile -t nsis < <(find release-assets -type f -iname '*.exe' -print | sort)
+          mapfile -t deb < <(find release-assets -type f -iname '*.deb' -print | sort)
+          mapfile -t rpm < <(find release-assets -type f -iname '*.rpm' -print | sort)
+          mapfile -t appimage < <(find release-assets -type f -iname '*.appimage' -print | sort)
+          mapfile -t dmg < <(find release-assets -type f -iname '*.dmg' -print | sort)
+
+          require_count() {
+            local label="$1"
+            local expected="$2"
+            local actual="$3"
+            if [[ "$actual" -ne "$expected" ]]; then
+              echo "Expected $expected $label asset(s), found $actual" >&2
+              find release-assets -type f -print | sort >&2
+              exit 1
+            fi
+          }
+
+          require_count MSI 1 "${#msi[@]}"
+          require_count NSIS 1 "${#nsis[@]}"
+          require_count Deb 2 "${#deb[@]}"
+          require_count RPM 2 "${#rpm[@]}"
+          require_count AppImage 2 "${#appimage[@]}"
+          require_count DMG 1 "${#dmg[@]}"
+
+          {
+            printf '%s\n' "${msi[@]}"
+            printf '%s\n' "${nsis[@]}"
+            printf '%s\n' "${deb[@]}"
+            printf '%s\n' "${rpm[@]}"
+            printf '%s\n' "${appimage[@]}"
+            printf '%s\n' "${dmg[@]}"
+          } > release-assets.txt
+
+          echo "Validated ${#msi[@]} MSI, ${#nsis[@]} NSIS, ${#deb[@]} Deb, ${#rpm[@]} RPM, ${#appimage[@]} AppImage, and ${#dmg[@]} DMG asset(s)."
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mapfile -t release_assets < release-assets.txt
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Agent Statistics $GITHUB_REF_NAME" \
+            --generate-notes \
+            "${release_assets[@]}"
