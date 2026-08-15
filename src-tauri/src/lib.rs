@@ -6,7 +6,7 @@ mod pricing;
 mod state;
 mod update;
 
-use crate::collectors::{all_collectors, FileScanPlan};
+use crate::collectors::{all_collectors, complete_jsonl_offset, FileScanPlan};
 use crate::db::UsageDb;
 use crate::models::{
     AgentDef, AppSettings, BalanceHistoryFilter, BalanceProvider, BalanceResult,
@@ -173,10 +173,6 @@ fn run_scan(
             continue;
         }
 
-        if force_full {
-            db.clear_agent(collector.id())?;
-        }
-
         let _ = app.emit(
             "scan-progress",
             ScanProgress {
@@ -188,89 +184,119 @@ fn run_scan(
 
         let mut count = 0usize;
         let mut last_emit = 0usize;
-        let seen_sources: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
-        let agent_id = collector.id().to_string();
-        let seen_for_sink = Rc::clone(&seen_sources);
-
-        let mut sink = |rec: UsageRecord| -> anyhow::Result<()> {
-            if !rec.source_file.is_empty() {
-                seen_for_sink.borrow_mut().insert(rec.source_file.clone());
-            }
-            db.insert_record(&rec)?;
-            count += 1;
-            total += 1;
-            // Throttle UI events — full scans can emit tens of thousands of rows.
-            if count - last_emit >= 500 {
-                let _ = app.emit(
-                    "scan-progress",
-                    ScanProgress {
-                        agent: collector.name().to_string(),
-                        count,
-                        error: None,
-                    },
-                );
-                last_emit = count;
-            }
-            Ok(())
-        };
-
-        // File planner: skip unchanged, tail append-only growth, full on shrink/rewrite.
-        let mut pending_meta: Vec<(String, i64, i64, i64)> = Vec::new();
-        let seen_for_planner = Rc::clone(&seen_sources);
-        let mut planner = |source: &str, mtime_ms: u64, size: u64| -> FileScanPlan {
-            seen_for_planner.borrow_mut().insert(source.to_string());
+        db.begin_tx()?;
+        let collector_result = (|| -> anyhow::Result<usize> {
             if force_full {
-                pending_meta.push((
-                    source.to_string(),
-                    mtime_ms as i64,
-                    size as i64,
-                    size as i64,
-                ));
-                // Full rescan deletes rows for this source before re-insert.
-                let _ = db.delete_by_source(&agent_id, source);
-                return FileScanPlan::Full;
+                db.clear_agent(collector.id())?;
             }
-            match db.get_scan_file(&agent_id, source) {
-                Ok(Some(meta)) if meta.mtime_ms == mtime_ms as i64 && meta.size == size as i64 => {
-                    FileScanPlan::Skip
+
+            let seen_sources: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+            let planner_error: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+            let agent_id = collector.id().to_string();
+            let seen_for_sink = Rc::clone(&seen_sources);
+
+            let mut sink = |rec: UsageRecord| -> anyhow::Result<()> {
+                if !rec.source_file.is_empty() {
+                    seen_for_sink.borrow_mut().insert(rec.source_file.clone());
                 }
-                Ok(Some(meta))
-                    if size as i64 > meta.size && meta.size >= 0 && source.ends_with(".jsonl") =>
-                {
-                    // Append-only jsonl growth — tail read, keep existing rows.
+                db.insert_record(&rec)?;
+                count += 1;
+                // Throttle UI events - full scans can emit tens of thousands of rows.
+                if count - last_emit >= 500 {
+                    let _ = app.emit(
+                        "scan-progress",
+                        ScanProgress {
+                            agent: collector.name().to_string(),
+                            count,
+                            error: None,
+                        },
+                    );
+                    last_emit = count;
+                }
+                Ok(())
+            };
+
+            // File planner: skip unchanged, tail append-only growth, full on shrink/rewrite.
+            let mut pending_meta: Vec<(String, i64, i64, i64)> = Vec::new();
+            let seen_for_planner = Rc::clone(&seen_sources);
+            let planner_error_for_closure = Rc::clone(&planner_error);
+            let mut planner = |source: &str, mtime_ms: u64, size: u64| -> FileScanPlan {
+                seen_for_planner.borrow_mut().insert(source.to_string());
+                let source_path = std::path::Path::new(source);
+                let complete_offset = complete_jsonl_offset(source_path, size);
+                let can_skip = !source.ends_with(".jsonl") || complete_offset == size;
+                if force_full {
                     pending_meta.push((
                         source.to_string(),
                         mtime_ms as i64,
                         size as i64,
-                        size as i64,
+                        complete_offset as i64,
                     ));
-                    FileScanPlan::Tail {
-                        offset: meta.size as u64,
+                    if let Err(e) = db.delete_by_source(&agent_id, source) {
+                        *planner_error_for_closure.borrow_mut() = Some(e.to_string());
+                    }
+                    return FileScanPlan::Full;
+                }
+                match db.get_scan_file(&agent_id, source) {
+                    Ok(Some(meta))
+                        if can_skip
+                            && meta.mtime_ms == mtime_ms as i64
+                            && meta.size == size as i64 =>
+                    {
+                        FileScanPlan::Skip
+                    }
+                    Ok(Some(meta))
+                        if size as i64 > meta.size
+                            && meta.size >= 0
+                            && source.ends_with(".jsonl") =>
+                    {
+                        pending_meta.push((
+                            source.to_string(),
+                            mtime_ms as i64,
+                            size as i64,
+                            complete_offset as i64,
+                        ));
+                        FileScanPlan::Tail {
+                            offset: meta.last_offset.max(0) as u64,
+                        }
+                    }
+                    Ok(_) => {
+                        if let Err(e) = db.delete_by_source(&agent_id, source) {
+                            *planner_error_for_closure.borrow_mut() = Some(e.to_string());
+                        }
+                        pending_meta.push((
+                            source.to_string(),
+                            mtime_ms as i64,
+                            size as i64,
+                            complete_offset as i64,
+                        ));
+                        FileScanPlan::Full
+                    }
+                    Err(e) => {
+                        *planner_error_for_closure.borrow_mut() = Some(e.to_string());
+                        FileScanPlan::Skip
                     }
                 }
-                _ => {
-                    // New, shrunk, or metadata missing — full file rebuild.
-                    let _ = db.delete_by_source(&agent_id, source);
-                    pending_meta.push((
-                        source.to_string(),
-                        mtime_ms as i64,
-                        size as i64,
-                        size as i64,
-                    ));
-                    FileScanPlan::Full
-                }
-            }
-        };
+            };
 
-        match collector.collect(settings, prices, &mut sink, &mut planner) {
-            Ok(()) => {
-                for (src, mtime, size, offset) in pending_meta {
-                    let _ = db.upsert_scan_file(&agent_id, &src, mtime, size, offset);
-                }
-                if !force_full {
-                    let keep = seen_sources.borrow().clone();
-                    let _ = db.prune_missing_sources(&agent_id, &keep);
-                }
+            collector.collect(settings, prices, &mut sink, &mut planner)?;
+            if let Some(error) = planner_error.borrow_mut().take() {
+                return Err(anyhow::anyhow!(error));
+            }
+            for (src, mtime, size, offset) in pending_meta {
+                db.upsert_scan_file(&agent_id, &src, mtime, size, offset)?;
+            }
+            if !force_full {
+                let keep = seen_sources.borrow().clone();
+                db.prune_missing_sources(&agent_id, &keep)?;
+            }
+            Ok(count)
+        })();
+
+        match collector_result {
+            Ok(count) => {
+                db.commit_tx()?;
+                total += count;
                 let _ = app.emit(
                     "scan-progress",
                     ScanProgress {
@@ -281,6 +307,7 @@ fn run_scan(
                 );
             }
             Err(e) => {
+                let _ = db.rollback_tx();
                 let msg = format!("{}: {}", collector.name(), e);
                 errors.push(msg.clone());
                 let _ = app.emit(

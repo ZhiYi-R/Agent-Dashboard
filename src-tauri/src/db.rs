@@ -56,6 +56,7 @@ impl UsageDb {
              CREATE INDEX IF NOT EXISTS idx_records_session ON records(session_id);
              CREATE INDEX IF NOT EXISTS idx_records_project ON records(project);
              CREATE INDEX IF NOT EXISTS idx_records_source ON records(source_file);
+             CREATE INDEX IF NOT EXISTS idx_records_timestamp ON records(timestamp DESC);
              CREATE TABLE IF NOT EXISTS scan_files (
                 agent TEXT NOT NULL,
                 source_file TEXT NOT NULL,
@@ -84,11 +85,6 @@ impl UsageDb {
              CREATE INDEX IF NOT EXISTS idx_balance_key ON balance_snapshots(provider_id, key_id, checked_at DESC);
             ",
         )?;
-        // Repair legacy empty model labels.
-        let _ = conn.execute(
-            "UPDATE records SET model = '<unknown>' WHERE TRIM(model) = '' OR model IS NULL",
-            [],
-        );
         Ok(Self { conn })
     }
 

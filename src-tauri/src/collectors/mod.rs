@@ -160,6 +160,32 @@ mod tests {
     }
 }
 
+pub fn complete_jsonl_offset(path: &std::path::Path, size: u64) -> u64 {
+    use std::io::{Read, Seek, SeekFrom};
+
+    if size == 0 || path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+        return size;
+    }
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return size;
+    };
+    let mut remaining = size;
+    let mut buffer = vec![0u8; 8192];
+    while remaining > 0 {
+        let chunk_size = remaining.min(buffer.len() as u64) as usize;
+        remaining -= chunk_size as u64;
+        if file.seek(SeekFrom::Start(remaining)).is_err()
+            || file.read_exact(&mut buffer[..chunk_size]).is_err()
+        {
+            return size;
+        }
+        if let Some(index) = buffer[..chunk_size].iter().rposition(|byte| *byte == b'\n') {
+            return remaining + index as u64 + 1;
+        }
+    }
+    0
+}
+
 pub fn all_collectors() -> Vec<Box<dyn Collector>> {
     vec![
         Box::new(claude::ClaudeCollector),
