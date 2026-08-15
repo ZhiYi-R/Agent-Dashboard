@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   checkBalanceProvider,
@@ -193,7 +193,7 @@ function primaryQuotaUsed(windows: BalanceWindow[] | undefined): number | undefi
   return undefined;
 }
 
-function KeyDashboardCard({
+const KeyDashboardCard = memo(function KeyDashboardCard({
   provider,
   keyItem,
   result,
@@ -307,7 +307,7 @@ function KeyDashboardCard({
       </CardContent>
     </Card>
   );
-}
+});
 
 function ProviderForm({
   provider,
@@ -674,7 +674,7 @@ function ProvidersDialog({
   );
 }
 
-export function BalanceTab({
+export const BalanceTab = memo(function BalanceTab({
   settings,
   onSettingsChange,
   autoRefreshToken = 0,
@@ -693,6 +693,8 @@ export function BalanceTab({
   const [historyKey, setHistoryKey] = useState<string>("");
   const [history, setHistory] = useState<BalanceSnapshotPoint[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const checkingRef = useRef(false);
+  const checkSequenceRef = useRef(0);
 
   // Load latest snapshots from SQLite once.
   useEffect(() => {
@@ -709,8 +711,9 @@ export function BalanceTab({
   // Background refresh finished (startup worker).
   useEffect(() => {
     let un: (() => void) | undefined;
-    void listen<BalanceResult[]>("balance-refreshed", (ev) => {
-      setResults(ev.payload);
+      void listen<BalanceResult[]>("balance-refreshed", (ev) => {
+        if (checkingRef.current) return;
+        setResults(ev.payload);
       setLastCheckedAt(new Date());
     }).then((f) => {
       un = f;
@@ -772,7 +775,7 @@ export function BalanceTab({
       });
       setHistory(rows);
     } catch (e) {
-      console.error(e);
+      setError(String(e));
     } finally {
       setHistoryLoading(false);
     }
@@ -835,16 +838,21 @@ export function BalanceTab({
   }, [history, historyKey]);
 
   const runCheckAll = useCallback(async () => {
-    if (savedProviders.length === 0) return;
+    if (savedProviders.length === 0 || checkingRef.current) return;
+    checkingRef.current = true;
+    const sequence = ++checkSequenceRef.current;
     setChecking(true);
     setError(null);
     try {
       const res = await checkBalances();
-      setResults(res);
-      setLastCheckedAt(new Date());
+      if (sequence === checkSequenceRef.current) {
+        setResults(res);
+        setLastCheckedAt(new Date());
+      }
     } catch (e) {
-      setError(String(e));
+      if (sequence === checkSequenceRef.current) setError(String(e));
     } finally {
+      checkingRef.current = false;
       setChecking(false);
     }
   }, [savedProviders.length]);
@@ -888,10 +896,14 @@ export function BalanceTab({
   };
 
   const checkOneKey = async (providerId: string) => {
+    if (checkingRef.current) return;
+    checkingRef.current = true;
+    const sequence = ++checkSequenceRef.current;
     setCheckingKey(providerId);
     setError(null);
     try {
       const res = await checkBalanceProvider(providerId);
+      if (sequence !== checkSequenceRef.current) return;
       setResults((prev) => {
         const m = new Map(prev.map((r) => [`${r.providerId}::${r.keyId}`, r]));
         for (const r of res) {
@@ -901,9 +913,10 @@ export function BalanceTab({
       });
       setLastCheckedAt(new Date());
     } catch (e) {
-      setError(String(e));
+      if (sequence === checkSequenceRef.current) setError(String(e));
     } finally {
-      setCheckingKey(null);
+      checkingRef.current = false;
+      if (sequence === checkSequenceRef.current) setCheckingKey(null);
     }
   };
 
@@ -1122,4 +1135,4 @@ export function BalanceTab({
       />
     </div>
   );
-}
+});

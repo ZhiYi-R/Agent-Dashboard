@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { AgentDef, RecordFilter } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,7 @@ const PRESETS: { id: DatePreset; labelKey: string }[] = [
   { id: "all", labelKey: "filter.allTime" },
 ];
 
-export function FilterBar({
+export const FilterBar = memo(function FilterBar({
   filter,
   onChange,
   agents,
@@ -210,4 +211,4 @@ export function FilterBar({
       </div>
     </div>
   );
-}
+});

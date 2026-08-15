@@ -111,15 +111,26 @@ export default function App() {
     null
   );
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [scanErrors, setScanErrors] = useState<string[]>([]);
   const latestRefreshRef = useRef<() => void>(() => {});
   const handleScanRef = useRef<(full?: boolean) => void>(() => {});
   const scanningRef = useRef(false);
-  const refreshInFlightRef = useRef(false);
+  const dashboardRefreshInFlightRef = useRef(false);
+  const countRefreshInFlightRef = useRef(false);
+  const pendingRefreshRef = useRef<{
+    kind: "full" | "records";
+    offset: number;
+    filter: RecordFilter;
+    allowDuringScan?: boolean;
+  } | null>(null);
   const liveRefreshTimerRef = useRef<number | null>(null);
   const filterRef = useRef(filter);
   filterRef.current = filter;
   const offsetRef = useRef(offset);
   offsetRef.current = offset;
+  const skipOffsetRefreshRef = useRef(false);
+  const scanFilterRef = useRef("");
 
   const load = async () => {
     setLoading(true);
@@ -138,8 +149,8 @@ export default function App() {
         balanceRefreshMinutes: s.balanceRefreshMinutes ?? 15,
         usageRefreshMinutes: s.usageRefreshMinutes ?? 30,
       });
-      await refreshData();
     } catch (e) {
+      setRefreshError(String(e));
       console.error(e);
     } finally {
       setLoading(false);
@@ -176,44 +187,97 @@ export default function App() {
     }
   };
 
-  /**
-   * Full dashboard refresh (records + count + heavy summary).
-   * Mid-scan 800ms polling froze the UI because getSummary does multiple
-   * full-table GROUP BY aggregates while the scanner is writing WAL — not
-   * because of the timer itself. Use allowDuringScan sparingly with a long interval.
-   */
+  /** Full dashboard refresh (records + heavy summary). */
   const refreshData = async (
     nextOffset = offset,
     nextFilter = filter,
     opts?: { allowDuringScan?: boolean }
   ) => {
-    if (refreshInFlightRef.current) return;
     if (scanningRef.current && !opts?.allowDuringScan) return;
-    refreshInFlightRef.current = true;
+    if (dashboardRefreshInFlightRef.current) {
+      pendingRefreshRef.current = {
+        kind: "full",
+        offset: nextOffset,
+        filter: nextFilter,
+        allowDuringScan: opts?.allowDuringScan,
+      };
+      return;
+    }
+    dashboardRefreshInFlightRef.current = true;
+    setRefreshError(null);
     try {
-      const [recs, total, sum] = await Promise.all([
+      const [recs, sum] = await Promise.all([
         getRecords(nextFilter, PAGE_SIZE, nextOffset),
-        countRecords(nextFilter),
         getSummary(nextFilter),
       ]);
       setRecords(recs);
-      setRecordCount(total);
+      setRecordCount(sum.records);
       setSummary(sum);
     } catch (e) {
+      const message = String(e);
+      setRefreshError(message);
       console.error("refresh failed:", e);
     } finally {
-      refreshInFlightRef.current = false;
+      dashboardRefreshInFlightRef.current = false;
+      const pending = pendingRefreshRef.current;
+      pendingRefreshRef.current = null;
+      if (pending && (!scanningRef.current || pending.allowDuringScan)) {
+        if (pending.kind === "full") {
+          void refreshData(pending.offset, pending.filter, {
+            allowDuringScan: pending.allowDuringScan,
+          });
+        } else {
+          void refreshRecords(pending.offset, pending.filter);
+        }
+      }
+    }
+  };
+
+  const refreshRecords = async (nextOffset = offset, nextFilter = filter) => {
+    if (scanningRef.current) return;
+    if (dashboardRefreshInFlightRef.current) {
+      pendingRefreshRef.current = {
+        kind: "records",
+        offset: nextOffset,
+        filter: nextFilter,
+      };
+      return;
+    }
+    try {
+      dashboardRefreshInFlightRef.current = true;
+      const recs = await getRecords(nextFilter, PAGE_SIZE, nextOffset);
+      setRecords(recs);
+    } catch (e) {
+      const message = String(e);
+      setRefreshError(message);
+      console.error("records refresh failed:", e);
+    } finally {
+      dashboardRefreshInFlightRef.current = false;
+      const pending = pendingRefreshRef.current;
+      pendingRefreshRef.current = null;
+      if (pending && (!scanningRef.current || pending.allowDuringScan)) {
+        if (pending.kind === "full") {
+          void refreshData(pending.offset, pending.filter, {
+            allowDuringScan: pending.allowDuringScan,
+          });
+        } else {
+          void refreshRecords(pending.offset, pending.filter);
+        }
+      }
     }
   };
 
   /** Cheap mid-scan tick: only COUNT(*) so the UI numbers move without full re-agg. */
   const refreshCountOnly = async (nextFilter = filter) => {
-    if (refreshInFlightRef.current) return;
+    if (countRefreshInFlightRef.current) return;
+    countRefreshInFlightRef.current = true;
     try {
       const total = await countRecords(nextFilter);
       setRecordCount(total);
     } catch (e) {
       console.error("count refresh failed:", e);
+    } finally {
+      countRefreshInFlightRef.current = false;
     }
   };
 
@@ -257,13 +321,23 @@ export default function App() {
         const { agent, count, error } = event.payload;
         setScanProgress((prev) => ({ ...prev, [agent]: { agent, count, error } }));
         if (error) {
+          setScanErrors((prev) => [...new Set([...prev, `${agent}: ${error}`])]);
           console.error("scan error:", agent, error);
         }
       })
     );
     unlisten.push(
-      listen<{ total: number; errors: string[] }>("scan-finished", () => {
+      listen<{ total: number; errors: string[] }>("scan-finished", (event) => {
         stopLiveRefresh();
+        if (event.payload.errors.length > 0) {
+          setScanErrors((prev) => [...new Set([...prev, ...event.payload.errors])]);
+        }
+        const filterChangedDuringScan =
+          scanFilterRef.current !== JSON.stringify(filterRef.current);
+        if (filterChangedDuringScan && offsetRef.current !== 0) {
+          skipOffsetRefreshRef.current = true;
+          setOffset(0);
+        }
         scanningRef.current = false;
         setScanning(false);
         setScanProgress({});
@@ -275,9 +349,13 @@ export default function App() {
           } catch (e) {
             console.error(e);
           }
-          await refreshData(offsetRef.current, filterRef.current, {
-            allowDuringScan: true,
-          });
+          await refreshData(
+            filterChangedDuringScan ? 0 : offsetRef.current,
+            filterRef.current,
+            {
+              allowDuringScan: true,
+            }
+          );
           const f = filterRef.current;
           try {
             const [ms, ps] = await Promise.all([
@@ -323,6 +401,7 @@ export default function App() {
   useEffect(() => {
     if (!settings) return;
     if (scanningRef.current) return;
+    if (offsetRef.current !== 0) skipOffsetRefreshRef.current = true;
     setOffset(0);
     const handle = window.setTimeout(() => {
       if (scanningRef.current) return;
@@ -344,16 +423,22 @@ export default function App() {
 
   useEffect(() => {
     if (!settings) return;
+    if (skipOffsetRefreshRef.current) {
+      skipOffsetRefreshRef.current = false;
+      return;
+    }
     if (scanningRef.current) return;
-    void refreshData(offset, filter);
+    void refreshRecords(offset, filter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offset]);
 
   const handleScan = async (full = false) => {
     // Mark scanning before any awaits so concurrent refreshes bail out.
     stopLiveRefresh();
+    scanFilterRef.current = JSON.stringify(filter);
     scanningRef.current = true;
     setScanning(true);
+    setScanErrors([]);
     setScanProgress({});
     if (full) {
       // Full scan rebuilds the DB — drop stale overview/records immediately.
@@ -562,6 +647,25 @@ export default function App() {
           </div>
         </div>
 
+        {refreshError && (
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <span>{t("errors.refresh")}: {refreshError}</span>
+            <Button variant="ghost" size="sm" onClick={() => setRefreshError(null)}>
+              {t("actions.reset")}
+            </Button>
+          </div>
+        )}
+        {scanErrors.length > 0 && (
+          <div className="mb-2 flex items-start justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <div>
+              <div className="font-medium">{t("errors.scan")}</div>
+              <div>{scanErrors.join("; ")}</div>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setScanErrors([])}>
+              {t("actions.reset")}
+            </Button>
+          </div>
+        )}
         {loading && !summary ? (
           <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
             <Skeleton className="h-20 w-full" />

@@ -19,6 +19,7 @@ export type MessageTree = {
     on: string;
   };
   scan: { scanning: string; rows: string; prices: string };
+  errors: { refresh: string; scan: string };
   overview: {
     records: string;
     sessions: string;
@@ -170,6 +171,10 @@ const zhCN: MessageTree = {
     scanning: "扫描中",
     rows: "{n} 条",
     prices: "价格",
+  },
+  errors: {
+    refresh: "仪表盘刷新失败",
+    scan: "扫描完成但存在错误",
   },
   overview: {
     records: "记录数",

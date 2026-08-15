@@ -33,6 +33,10 @@ const en = {
     rows: "{n} rows",
     prices: "Prices",
   },
+  errors: {
+    refresh: "Dashboard refresh failed",
+    scan: "Scan completed with errors",
+  },
   overview: {
     records: "Records",
     sessions: "Sessions",
