@@ -45,6 +45,7 @@ jobs:
             curl \
             wget \
             file \
+            xdg-utils \
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
@@ -158,6 +159,7 @@ jobs:
             curl \
             wget \
             file \
+            xdg-utils \
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
