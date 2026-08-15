@@ -62,23 +62,30 @@ jobs:
 
           release_version="${RELEASE_TAG#Release-}"
           release_version="${release_version#v}"
-          if [[ ! "$release_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must use Release-<semver> or Release-v<semver>: $RELEASE_TAG" >&2
+          if [[ "$release_version" =~ ^([0-9]+)\.([0-9]+)(\.([0-9]+))?([.-][0-9A-Za-z.-]+)?$ ]]; then
+            major="${BASH_REMATCH[1]}"
+            minor="${BASH_REMATCH[2]}"
+            patch="${BASH_REMATCH[4]:-0}"
+            suffix="${BASH_REMATCH[5]}"
+            release_version="${major}.${minor}.${patch}${suffix}"
+          else
+            echo "Release tag must use Release-<version> or Release-v<version>: $RELEASE_TAG" >&2
             exit 1
           fi
+          release_core="${release_version%%[-+]*}"
 
           package_version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
           tauri_version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
           cargo_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' src-tauri/Cargo.toml | head -n 1)"
 
           for version in "$package_version" "$tauri_version" "$cargo_version"; do
-            if [[ "$version" != "$release_version" ]]; then
-              echo "Release version $release_version does not match project version $version" >&2
+            if [[ "$version" != "$release_core" ]]; then
+              echo "Release version $release_core does not match project version $version" >&2
               exit 1
             fi
           done
 
-          echo "Validated release version: $release_version"
+          echo "Validated release version: $release_version (core: $release_core)"
 
       - name: Build frontend
         run: npm run build
@@ -244,8 +251,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mapfile -t release_assets < release-assets.txt
+          release_version="${GITHUB_REF_NAME#Release-}"
+          release_version="${release_version#v}"
+          release_flags=()
+          if [[ "$release_version" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Agent Statistics $GITHUB_REF_NAME" \
             --generate-notes \
+            "${release_flags[@]}" \
             "${release_assets[@]}"
