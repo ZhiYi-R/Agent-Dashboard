@@ -1041,14 +1041,18 @@ export const BalanceTab = memo(function BalanceTab({
                       />
                       <XAxis
                         dataKey="label"
-                        tick={{ fontSize: 10 }}
+                        tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                        axisLine={{ stroke: "var(--border)" }}
+                        tickLine={{ stroke: "var(--border)" }}
                         interval="preserveStartEnd"
                         minTickGap={24}
                       />
                       <YAxis
                         yAxisId="left"
                         orientation="left"
-                        tick={{ fontSize: 10 }}
+                        tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                        axisLine={{ stroke: "var(--border)" }}
+                        tickLine={{ stroke: "var(--border)" }}
                         width={52}
                         tickFormatter={(v) => Number(v).toFixed(2)}
                       />
@@ -1056,12 +1060,23 @@ export const BalanceTab = memo(function BalanceTab({
                         yAxisId="right"
                         orientation="right"
                         domain={[0, 100]}
-                        tick={{ fontSize: 10 }}
+                        tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                        axisLine={{ stroke: "var(--border)" }}
+                        tickLine={{ stroke: "var(--border)" }}
                         width={36}
                         tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
                       />
                       <Tooltip
-                        contentStyle={{ fontSize: 12 }}
+                        contentStyle={{
+                          backgroundColor: "var(--popover)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 4,
+                          color: "var(--popover-foreground)",
+                          fontSize: 12,
+                        }}
+                        labelStyle={{ color: "var(--popover-foreground)" }}
+                        itemStyle={{ color: "var(--popover-foreground)" }}
+                        cursor={{ fill: "var(--muted)" }}
                         formatter={(v, name) => {
                           const val = v == null ? null : Number(v);
                           if (val == null || Number.isNaN(val)) return ["—", name];
@@ -1071,7 +1086,12 @@ export const BalanceTab = memo(function BalanceTab({
                           return [val.toFixed(4), name];
                         }}
                       />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Legend
+                        wrapperStyle={{
+                          color: "var(--muted-foreground)",
+                          fontSize: 11,
+                        }}
+                      />
                       <Line
                         yAxisId="left"
                         type="monotone"

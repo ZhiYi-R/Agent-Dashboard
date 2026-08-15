@@ -730,20 +730,26 @@ export default function App() {
                         <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                         <XAxis
                           dataKey="day"
-                          tick={{ fontSize: 10 }}
+                          tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                          axisLine={{ stroke: "var(--border)" }}
+                          tickLine={{ stroke: "var(--border)" }}
                           interval="preserveStartEnd"
                         />
                         <YAxis
                           yAxisId="left"
                           orientation="left"
-                          tick={{ fontSize: 10 }}
+                          tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                          axisLine={{ stroke: "var(--border)" }}
+                          tickLine={{ stroke: "var(--border)" }}
                           width={56}
                           tickFormatter={(v) => `$${Number(v).toFixed(2)}`}
                         />
                         <YAxis
                           yAxisId="right"
                           orientation="right"
-                          tick={{ fontSize: 10 }}
+                          tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                          axisLine={{ stroke: "var(--border)" }}
+                          tickLine={{ stroke: "var(--border)" }}
                           width={48}
                           tickFormatter={(v) => formatTokens(Number(v))}
                         />
@@ -757,9 +763,23 @@ export default function App() {
                               name,
                             ];
                           }}
-                          contentStyle={{ fontSize: 12 }}
+                          contentStyle={{
+                            backgroundColor: "var(--popover)",
+                            border: "1px solid var(--border)",
+                            borderRadius: 4,
+                            color: "var(--popover-foreground)",
+                            fontSize: 12,
+                          }}
+                          labelStyle={{ color: "var(--popover-foreground)" }}
+                          itemStyle={{ color: "var(--popover-foreground)" }}
+                          cursor={{ fill: "var(--muted)" }}
                         />
-                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        <Legend
+                          wrapperStyle={{
+                            color: "var(--muted-foreground)",
+                            fontSize: 11,
+                          }}
+                        />
                         <Bar
                           yAxisId="left"
                           dataKey="totalCostUsd"
