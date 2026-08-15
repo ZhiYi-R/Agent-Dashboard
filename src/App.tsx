@@ -784,7 +784,7 @@ export default function App() {
                           yAxisId="left"
                           dataKey="totalCostUsd"
                           name={t("overview.cost")}
-                          fill="var(--primary)"
+                          fill="var(--chart-1)"
                           radius={[3, 3, 0, 0]}
                         />
                         <Line
@@ -792,7 +792,7 @@ export default function App() {
                           type="monotone"
                           dataKey="totalInput"
                           name={t("overview.input")}
-                          stroke="#3b82f6"
+                          stroke="var(--chart-2)"
                           dot={false}
                           strokeWidth={2}
                         />
@@ -801,7 +801,7 @@ export default function App() {
                           type="monotone"
                           dataKey="totalOutput"
                           name={t("overview.output")}
-                          stroke="#10b981"
+                          stroke="var(--chart-3)"
                           dot={false}
                           strokeWidth={2}
                         />
@@ -810,7 +810,7 @@ export default function App() {
                           type="monotone"
                           dataKey="totalCacheRead"
                           name={t("overview.cacheHit")}
-                          stroke="#f59e0b"
+                          stroke="var(--chart-4)"
                           dot={false}
                           strokeWidth={2}
                         />
@@ -819,7 +819,7 @@ export default function App() {
                           type="monotone"
                           dataKey="totalCacheCreation"
                           name={t("overview.cacheWrite")}
-                          stroke="#8b5cf6"
+                          stroke="var(--chart-5)"
                           dot={false}
                           strokeWidth={2}
                         />
@@ -828,7 +828,7 @@ export default function App() {
                           type="monotone"
                           dataKey="totalReasoning"
                           name={t("overview.reasoning")}
-                          stroke="#ec4899"
+                          stroke="var(--chart-6)"
                           dot={false}
                           strokeWidth={2}
                         />
@@ -1323,7 +1323,7 @@ export default function App() {
                     <p
                       className={`text-xs ${
                         updateResult.updateAvailable
-                          ? "text-amber-600 dark:text-amber-400"
+                          ? "text-amber-700 dark:text-amber-400"
                           : "text-muted-foreground"
                       }`}
                     >

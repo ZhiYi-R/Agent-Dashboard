@@ -928,7 +928,7 @@ export const BalanceTab = memo(function BalanceTab({
             {t("balance.title")}
           </span>
           <span>{t("balance.keys", { n: summaryStats.total })}</span>
-          <span className="text-emerald-600 dark:text-emerald-400">
+          <span className="text-emerald-700 dark:text-emerald-400">
             {t("balance.ok", { n: summaryStats.ok })}
           </span>
           {summaryStats.fail > 0 && (
@@ -1097,7 +1097,7 @@ export const BalanceTab = memo(function BalanceTab({
                         type="monotone"
                         dataKey="available"
                         name={t("balance.availableSeries")}
-                        stroke="#3b82f6"
+                        stroke="var(--chart-2)"
                         dot={false}
                         strokeWidth={2}
                         connectNulls
@@ -1107,7 +1107,7 @@ export const BalanceTab = memo(function BalanceTab({
                         type="monotone"
                         dataKey="quotaUsed"
                         name={t("balance.quotaUsedSeries")}
-                        stroke="#f59e0b"
+                        stroke="var(--chart-4)"
                         dot={false}
                         strokeWidth={2}
                         connectNulls
