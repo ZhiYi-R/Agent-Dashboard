@@ -5,13 +5,14 @@ use crate::pricing::PriceCache;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
 pub struct AppState {
     pub db_path: PathBuf,
     pub price_cache: Arc<Mutex<PriceCache>>,
     pub settings: Arc<Mutex<AppSettings>>,
+    pub scan_running: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -35,6 +36,7 @@ impl AppState {
             db_path,
             price_cache: Arc::new(Mutex::new(price_cache)),
             settings: Arc::new(Mutex::new(settings)),
+            scan_running: Arc::new(AtomicBool::new(false)),
         })
     }
 }

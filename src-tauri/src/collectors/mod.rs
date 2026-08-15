@@ -64,8 +64,6 @@ pub fn plan_and_open_jsonl(
     path: &std::path::Path,
     planner: &mut FilePlanner<'_>,
 ) -> Result<Option<(std::fs::File, u64, u64, u64, bool)>> {
-    use std::io::{Seek, SeekFrom};
-
     let meta = std::fs::metadata(path)?;
     let mtime_ms = meta
         .modified()
@@ -85,13 +83,80 @@ pub fn plan_and_open_jsonl(
         FileScanPlan::Tail { offset } => {
             let mut f = std::fs::File::open(path)?;
             if offset > 0 && offset <= size {
-                f.seek(SeekFrom::Start(offset))?;
-                Ok(Some((f, mtime_ms, size, offset, false)))
+                let start = rewind_to_line_start(&mut f, offset)?;
+                Ok(Some((f, mtime_ms, size, start, false)))
             } else {
-                // offset invalid / truncated → full
+                // offset invalid / truncated -> full
                 Ok(Some((f, mtime_ms, size, 0, true)))
             }
         }
+    }
+}
+
+fn rewind_to_line_start(file: &mut std::fs::File, offset: u64) -> Result<u64> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut pos = offset;
+    let mut byte = [0u8; 1];
+    while pos > 0 {
+        pos -= 1;
+        file.seek(SeekFrom::Start(pos))?;
+        file.read_exact(&mut byte)?;
+        if byte[0] == b'\n' {
+            let start = pos + 1;
+            file.seek(SeekFrom::Start(start))?;
+            return Ok(start);
+        }
+    }
+    file.seek(SeekFrom::Start(0))?;
+    Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+
+    fn temp_file(name: &str, contents: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "agent-statistics-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn tail_rewinds_to_incomplete_line_start() {
+        let path = temp_file("tail", b"complete\npartial-rest\n");
+        let offset = b"complete\npartial".len() as u64;
+        let mut planner = |_: &str, _: u64, _: u64| FileScanPlan::Tail { offset };
+        let (mut file, _, _, start, full) =
+            plan_and_open_jsonl(&path, &mut planner).unwrap().unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+        assert_eq!(start, b"complete\n".len() as u64);
+        assert!(!full);
+        assert_eq!(contents, "partial-rest\n");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn invalid_tail_offset_falls_back_to_full_scan() {
+        let path = temp_file("tail-full", b"complete\n");
+        let mut planner = |_: &str, _: u64, _: u64| FileScanPlan::Tail { offset: 99 };
+        let (mut file, _, _, start, full) =
+            plan_and_open_jsonl(&path, &mut planner).unwrap().unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+        assert_eq!(start, 0);
+        assert!(full);
+        assert_eq!(contents, "complete\n");
+        std::fs::remove_file(path).unwrap();
     }
 }
 

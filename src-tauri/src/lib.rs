@@ -17,7 +17,7 @@ use crate::state::{data_dir, list_agents, save_settings, AppState};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[tauri::command]
@@ -111,10 +111,19 @@ struct ScanFinished {
 
 #[tauri::command]
 fn start_scan(app: AppHandle, state: State<AppState>, full: Option<bool>) -> Result<(), String> {
+    if state
+        .scan_running
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        return Err("scan already running".into());
+    }
+
     let settings = state.settings.lock().unwrap().clone();
     let prices = state.price_cache.lock().unwrap().clone();
     let db_path = state.db_path.clone();
     let force_full = full.unwrap_or(false);
+    let scan_running = Arc::clone(&state.scan_running);
 
     std::thread::spawn(move || {
         let app2 = app.clone();
@@ -142,6 +151,7 @@ fn start_scan(app: AppHandle, state: State<AppState>, full: Option<bool>) -> Res
                 );
             }
         }
+        scan_running.store(false, Ordering::Release);
     });
 
     Ok(())
@@ -538,6 +548,14 @@ fn maybe_import_on_startup(app: &AppHandle, state: &AppState) {
     }
     let settings = state.settings.lock().unwrap().clone();
     let prices = state.price_cache.lock().unwrap().clone();
+    if state
+        .scan_running
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        return;
+    }
+    let scan_running = Arc::clone(&state.scan_running);
     let app = app.clone();
     std::thread::spawn(move || {
         let _ = app.emit(
@@ -572,6 +590,7 @@ fn maybe_import_on_startup(app: &AppHandle, state: &AppState) {
                 );
             }
         }
+        scan_running.store(false, Ordering::Release);
     });
 }
 

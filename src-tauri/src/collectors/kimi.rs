@@ -83,21 +83,26 @@ impl Collector for KimiCollector {
                     .cloned()
                     .or_else(|| infer_project_from_path(path));
 
-                let Some((file, _mtime, _size, _offset, _full)) =
+                let Some((file, _mtime, _size, start_offset, _full)) =
                     plan_and_open_jsonl(path, planner)?
                 else {
                     continue;
                 };
-                let reader = BufReader::new(file);
-                let mut line_no: u64 = 0;
+                let mut reader = BufReader::new(file);
+                let mut line_offset = start_offset;
+                let mut line = String::new();
 
-                for line in reader.lines() {
-                    line_no += 1;
-                    let line = match line {
-                        Ok(l) if l.trim().is_empty() => continue,
-                        Ok(l) => l,
-                        Err(_) => continue,
-                    };
+                loop {
+                    line.clear();
+                    let bytes_read = reader.read_line(&mut line)?;
+                    if bytes_read == 0 {
+                        break;
+                    }
+                    let current_offset = line_offset;
+                    line_offset += bytes_read as u64;
+                    if line.trim().is_empty() {
+                        continue;
+                    }
                     let Ok(val): Result<Value, _> = serde_json::from_str(&line) else {
                         continue;
                     };
@@ -120,7 +125,7 @@ impl Collector for KimiCollector {
                             session_id,
                             agent_name,
                             ts.timestamp_millis(),
-                            line_no
+                            current_offset
                         ),
                         agent: "kimi".to_string(),
                         session_id: session_id.clone(),
