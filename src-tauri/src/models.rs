@@ -202,6 +202,52 @@ pub struct BalanceResult {
     pub raw: Option<serde_json::Value>,
 }
 
+/// One historical balance check row (from `balance_snapshots`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BalanceSnapshotPoint {
+    pub checked_at: DateTime<Utc>,
+    pub provider_id: String,
+    pub provider_type: String,
+    pub key_id: String,
+    pub key_name: String,
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<BalanceWindow>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BalanceHistoryFilter {
+    pub provider_id: Option<String>,
+    pub key_id: Option<String>,
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    /// Hard cap; default applied in DB layer when None/0.
+    pub limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheckResult {
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    pub release_url: Option<String>,
+    pub download_url: Option<String>,
+    pub notes: Option<String>,
+    pub published_at: Option<String>,
+    pub checked_at: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {

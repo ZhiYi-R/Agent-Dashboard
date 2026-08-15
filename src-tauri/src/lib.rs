@@ -4,11 +4,13 @@ mod db;
 mod models;
 mod pricing;
 mod state;
+mod update;
 
 use crate::collectors::{all_collectors, FileScanPlan};
 use crate::db::UsageDb;
 use crate::models::{
-    AgentDef, AppSettings, BalanceProvider, BalanceResult, RecordFilter, UsageRecord, UsageSummary,
+    AgentDef, AppSettings, BalanceHistoryFilter, BalanceProvider, BalanceResult,
+    BalanceSnapshotPoint, RecordFilter, UpdateCheckResult, UsageRecord, UsageSummary,
 };
 use crate::pricing::PriceCache;
 use crate::state::{data_dir, list_agents, save_settings, AppState};
@@ -464,9 +466,28 @@ fn get_balance_checked_at(state: State<AppState>) -> Result<Option<String>, Stri
 }
 
 #[tauri::command]
+fn get_balance_history(
+    state: State<AppState>,
+    filter: BalanceHistoryFilter,
+) -> Result<Vec<BalanceSnapshotPoint>, String> {
+    let db = UsageDb::open(&state.db_path).map_err(|e| e.to_string())?;
+    db.balance_history(&filter).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_record_count_total(state: State<AppState>) -> Result<u64, String> {
     let db = UsageDb::open(&state.db_path).map_err(|e| e.to_string())?;
     db.total_record_count().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_app_version() -> String {
+    update::current_version()
+}
+
+#[tauri::command]
+fn check_for_updates() -> Result<UpdateCheckResult, String> {
+    update::check_latest_release()
 }
 
 /// Validate settings payload still deserializes as BalanceProvider list helpers for frontend.
@@ -585,7 +606,10 @@ pub fn run() {
             check_balance_provider,
             get_latest_balances,
             get_balance_checked_at,
+            get_balance_history,
             get_record_count_total,
+            get_app_version,
+            check_for_updates,
             recalculate_costs_cmd,
         ])
         .run(tauri::generate_context!())

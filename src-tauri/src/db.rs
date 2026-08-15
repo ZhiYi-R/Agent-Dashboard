@@ -174,6 +174,80 @@ impl UsageDb {
         Ok(val.and_then(|s| s.parse::<DateTime<Utc>>().ok()))
     }
 
+    /// Time series of balance snapshots, oldest → newest.
+    pub fn balance_history(
+        &self,
+        filter: &crate::models::BalanceHistoryFilter,
+    ) -> Result<Vec<crate::models::BalanceSnapshotPoint>> {
+        let mut conditions = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(pid) = filter.provider_id.as_ref().filter(|s| !s.is_empty()) {
+            conditions.push("provider_id = ?".to_string());
+            params.push(Box::new(pid.clone()));
+        }
+        if let Some(kid) = filter.key_id.as_ref().filter(|s| !s.is_empty()) {
+            conditions.push("key_id = ?".to_string());
+            params.push(Box::new(kid.clone()));
+        }
+        if let Some(from) = filter.from {
+            conditions.push("checked_at >= ?".to_string());
+            params.push(Box::new(from.to_rfc3339()));
+        }
+        if let Some(to) = filter.to {
+            conditions.push("checked_at <= ?".to_string());
+            params.push(Box::new(to.to_rfc3339()));
+        }
+
+        let where_sql = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+        let limit = match filter.limit {
+            Some(0) | None => 2000,
+            Some(n) => n.clamp(1, 5000),
+        };
+        // Prefer recent window when capped: take last N then reverse to ascending.
+        let sql = format!(
+            "SELECT checked_at, provider_id, provider_type, key_id, key_name, success,
+                    available, total, currency, windows_json, message
+             FROM balance_snapshots
+             {where_sql}
+             ORDER BY checked_at DESC
+             LIMIT {limit}"
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut rows = stmt.query(param_refs.as_slice())?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            let success: i64 = row.get(5)?;
+            let windows_json: String = row.get(9)?;
+            let windows: Vec<crate::models::BalanceWindow> =
+                serde_json::from_str(&windows_json).unwrap_or_default();
+            let checked_at: String = row.get(0)?;
+            out.push(crate::models::BalanceSnapshotPoint {
+                checked_at: checked_at
+                    .parse::<DateTime<Utc>>()
+                    .unwrap_or_else(|_| Utc::now()),
+                provider_id: row.get(1)?,
+                provider_type: row.get(2)?,
+                key_id: row.get(3)?,
+                key_name: row.get(4)?,
+                success: success != 0,
+                available: row.get(6)?,
+                total: row.get(7)?,
+                currency: row.get(8)?,
+                windows,
+                message: row.get(10)?,
+            });
+        }
+        out.reverse();
+        Ok(out)
+    }
+
     pub fn clear_agent(&self, agent: &str) -> Result<()> {
         self.conn
             .execute("DELETE FROM records WHERE agent = ?1", [agent])?;

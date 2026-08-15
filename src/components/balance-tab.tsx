@@ -4,6 +4,7 @@ import {
   checkBalanceProvider,
   checkBalances,
   getBalanceCheckedAt,
+  getBalanceHistory,
   getLatestBalances,
   saveSettings,
 } from "@/lib/api";
@@ -13,6 +14,7 @@ import type {
   BalanceProvider,
   BalanceProviderType,
   BalanceResult,
+  BalanceSnapshotPoint,
   BalanceWindow,
 } from "@/types";
 import { BALANCE_PROVIDER_META } from "@/types";
@@ -48,6 +50,17 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { useT } from "@/i18n";
+import { addLocalDays, startOfLocalDay } from "@/lib/date-range";
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 type TFunc = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -162,18 +175,40 @@ function WindowBar({ w }: { w: BalanceWindow }) {
   );
 }
 
+function primaryQuotaUsed(windows: BalanceWindow[] | undefined): number | undefined {
+  if (!windows?.length) return undefined;
+  for (const w of windows) {
+    if (w.usedPercent !== undefined && Number.isFinite(w.usedPercent)) {
+      return Math.min(100, Math.max(0, w.usedPercent));
+    }
+    if (
+      w.remaining !== undefined &&
+      w.total !== undefined &&
+      w.total > 0 &&
+      Number.isFinite(w.remaining)
+    ) {
+      return Math.min(100, Math.max(0, ((w.total - w.remaining) / w.total) * 100));
+    }
+  }
+  return undefined;
+}
+
 function KeyDashboardCard({
   provider,
   keyItem,
   result,
   onCheck,
   checking,
+  selected,
+  onSelect,
 }: {
   provider: BalanceProvider;
   keyItem: BalanceKey;
   result?: BalanceResult;
   onCheck: () => void;
   checking: boolean;
+  selected?: boolean;
+  onSelect?: () => void;
 }) {
   const t = useT();
   const meta = BALANCE_PROVIDER_META[provider.providerType];
@@ -181,7 +216,13 @@ function KeyDashboardCard({
   const windows = result?.windows ?? [];
 
   return (
-    <Card size="sm" className="h-full min-w-0">
+    <Card
+      size="sm"
+      className={`h-full min-w-0 cursor-pointer transition-colors ${
+        selected ? "border-primary ring-1 ring-primary/40" : "hover:border-foreground/20"
+      }`}
+      onClick={onSelect}
+    >
       <CardHeader className="flex-row items-start justify-between gap-2 space-y-0 pb-2">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -203,7 +244,10 @@ function KeyDashboardCard({
           variant="ghost"
           className="h-7 w-7 shrink-0 p-0"
           disabled={checking}
-          onClick={onCheck}
+          onClick={(e) => {
+            e.stopPropagation();
+            onCheck();
+          }}
         >
           <RefreshCw className={`h-3.5 w-3.5 ${checking ? "animate-spin" : ""}`} />
         </Button>
@@ -645,6 +689,10 @@ export function BalanceTab({
   const [error, setError] = useState<string | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
   const loadedRef = useRef(false);
+  const [historyDays, setHistoryDays] = useState<7 | 30 | 90>(30);
+  const [historyKey, setHistoryKey] = useState<string>("");
+  const [history, setHistory] = useState<BalanceSnapshotPoint[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Load latest snapshots from SQLite once.
   useEffect(() => {
@@ -700,6 +748,91 @@ export function BalanceTab({
       providers: savedProviders.length,
     };
   }, [results, dashboardCards.length, savedProviders.length]);
+
+  const loadHistory = useCallback(async () => {
+    if (savedProviders.length === 0) {
+      setHistory([]);
+      return;
+    }
+    setHistoryLoading(true);
+    try {
+      const from = startOfLocalDay(addLocalDays(new Date(), -(historyDays - 1))).toISOString();
+      let providerId: string | undefined;
+      let keyId: string | undefined;
+      if (historyKey) {
+        const [pid, kid] = historyKey.split("::");
+        providerId = pid || undefined;
+        keyId = kid || undefined;
+      }
+      const rows = await getBalanceHistory({
+        from,
+        providerId,
+        keyId,
+        limit: 2000,
+      });
+      setHistory(rows);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [savedProviders.length, historyDays, historyKey]);
+
+  useEffect(() => {
+    if (!active) return;
+    void loadHistory();
+  }, [active, loadHistory, lastCheckedAt]);
+
+  const historyChart = useMemo(() => {
+    const successRows = history.filter((h) => h.success);
+    if (successRows.length === 0) return [] as {
+      t: string;
+      label: string;
+      available?: number;
+      quotaUsed?: number;
+    }[];
+
+    // If all keys selected, pick the key with the most points for a readable chart.
+    let series = successRows;
+    if (!historyKey) {
+      const counts = new Map<string, number>();
+      for (const r of successRows) {
+        const k = `${r.providerId}::${r.keyId}`;
+        counts.set(k, (counts.get(k) ?? 0) + 1);
+      }
+      let best = "";
+      let bestN = 0;
+      for (const [k, n] of counts) {
+        if (n > bestN) {
+          best = k;
+          bestN = n;
+        }
+      }
+      if (best) {
+        const [pid, kid] = best.split("::");
+        series = successRows.filter(
+          (r) => r.providerId === pid && r.keyId === kid
+        );
+      }
+    }
+
+    return series.map((r) => {
+      const d = new Date(r.checkedAt);
+      return {
+        t: r.checkedAt,
+        label: Number.isNaN(d.getTime())
+          ? r.checkedAt.slice(5, 16)
+          : d.toLocaleString(undefined, {
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+        available: r.available,
+        quotaUsed: primaryQuotaUsed(r.windows),
+      };
+    });
+  }, [history, historyKey]);
 
   const runCheckAll = useCallback(async () => {
     if (savedProviders.length === 0) return;
@@ -822,9 +955,9 @@ export function BalanceTab({
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 space-y-3 overflow-auto">
         {dashboardCards.length === 0 ? (
-          <div className="flex h-full min-h-[160px] items-center justify-center text-sm text-muted-foreground">
+          <div className="flex min-h-[160px] items-center justify-center text-sm text-muted-foreground">
             <Button
               variant="link"
               className="px-1"
@@ -835,24 +968,149 @@ export function BalanceTab({
             {t("balance.addProviders")}
           </div>
         ) : (
-          <div
-            className="grid gap-3"
-            style={{
-              gridTemplateColumns:
-                "repeat(auto-fill, minmax(min(100%, 260px), 1fr))",
-            }}
-          >
-            {dashboardCards.map(({ provider, key }) => (
-              <KeyDashboardCard
-                key={`${provider.id}::${key.id}`}
-                provider={provider}
-                keyItem={key}
-                result={resultMap.get(`${provider.id}::${key.id}`)}
-                checking={checking || checkingKey === provider.id}
-                onCheck={() => void checkOneKey(provider.id)}
-              />
-            ))}
-          </div>
+          <>
+            <Card className="shrink-0">
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 py-3">
+                <CardTitle className="text-sm">{t("balance.history")}</CardTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  {([7, 30, 90] as const).map((d) => (
+                    <Button
+                      key={d}
+                      size="sm"
+                      variant={historyDays === d ? "default" : "outline"}
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setHistoryDays(d)}
+                    >
+                      {t(
+                        d === 7
+                          ? "balance.range7d"
+                          : d === 30
+                            ? "balance.range30d"
+                            : "balance.range90d"
+                      )}
+                    </Button>
+                  ))}
+                  <select
+                    className="h-7 max-w-[220px] rounded-md border bg-background px-2 text-xs"
+                    value={historyKey}
+                    onChange={(e) => setHistoryKey(e.target.value)}
+                  >
+                    <option value="">{t("balance.allKeys")}</option>
+                    {dashboardCards.map(({ provider, key }) => (
+                      <option
+                        key={`${provider.id}::${key.id}`}
+                        value={`${provider.id}::${key.id}`}
+                      >
+                        {provider.name} / {key.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </CardHeader>
+              <CardContent className="h-[220px] pt-0">
+                {historyLoading ? (
+                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    …
+                  </div>
+                ) : historyChart.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    {t("balance.historyEmpty")}
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={historyChart}
+                      margin={{ top: 8, right: 12, bottom: 0, left: 0 }}
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        className="stroke-border"
+                      />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fontSize: 10 }}
+                        interval="preserveStartEnd"
+                        minTickGap={24}
+                      />
+                      <YAxis
+                        yAxisId="left"
+                        orientation="left"
+                        tick={{ fontSize: 10 }}
+                        width={52}
+                        tickFormatter={(v) => Number(v).toFixed(2)}
+                      />
+                      <YAxis
+                        yAxisId="right"
+                        orientation="right"
+                        domain={[0, 100]}
+                        tick={{ fontSize: 10 }}
+                        width={36}
+                        tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
+                      />
+                      <Tooltip
+                        contentStyle={{ fontSize: 12 }}
+                        formatter={(v, name) => {
+                          const val = v == null ? null : Number(v);
+                          if (val == null || Number.isNaN(val)) return ["—", name];
+                          if (name === t("balance.quotaUsedSeries")) {
+                            return [`${val.toFixed(1)}%`, name];
+                          }
+                          return [val.toFixed(4), name];
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Line
+                        yAxisId="left"
+                        type="monotone"
+                        dataKey="available"
+                        name={t("balance.availableSeries")}
+                        stroke="#3b82f6"
+                        dot={false}
+                        strokeWidth={2}
+                        connectNulls
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="quotaUsed"
+                        name={t("balance.quotaUsedSeries")}
+                        stroke="#f59e0b"
+                        dot={false}
+                        strokeWidth={2}
+                        connectNulls
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            <div
+              className="grid gap-3"
+              style={{
+                gridTemplateColumns:
+                  "repeat(auto-fill, minmax(min(100%, 260px), 1fr))",
+              }}
+            >
+              {dashboardCards.map(({ provider, key }) => {
+                const id = `${provider.id}::${key.id}`;
+                return (
+                  <KeyDashboardCard
+                    key={id}
+                    provider={provider}
+                    keyItem={key}
+                    result={resultMap.get(id)}
+                    checking={checking || checkingKey === provider.id}
+                    onCheck={() => void checkOneKey(provider.id)}
+                    selected={historyKey === id}
+                    onSelect={() =>
+                      setHistoryKey((prev) => (prev === id ? "" : id))
+                    }
+                  />
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
 

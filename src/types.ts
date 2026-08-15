@@ -137,6 +137,40 @@ export interface BalanceResult {
   raw?: unknown;
 }
 
+export interface BalanceSnapshotPoint {
+  checkedAt: string;
+  providerId: string;
+  providerType: string;
+  keyId: string;
+  keyName: string;
+  success: boolean;
+  available?: number;
+  total?: number;
+  currency?: string;
+  windows?: BalanceWindow[];
+  message: string;
+}
+
+export interface BalanceHistoryFilter {
+  providerId?: string;
+  keyId?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export interface UpdateCheckResult {
+  currentVersion: string;
+  latestVersion?: string | null;
+  updateAvailable: boolean;
+  releaseUrl?: string | null;
+  downloadUrl?: string | null;
+  notes?: string | null;
+  publishedAt?: string | null;
+  checkedAt: string;
+  message: string;
+}
+
 export interface AppSettings {
   agents: Record<string, AgentSettings>;
   priceSyncDays: number;

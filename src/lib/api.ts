@@ -2,9 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AgentDef,
   AppSettings,
+  BalanceHistoryFilter,
   BalanceResult,
+  BalanceSnapshotPoint,
   PriceCache,
   RecordFilter,
+  UpdateCheckResult,
   UsageRecord,
   UsageSummary,
 } from "@/types";
@@ -59,5 +62,15 @@ export const getLatestBalances = (): Promise<BalanceResult[]> =>
 export const getBalanceCheckedAt = (): Promise<string | null> =>
   invoke("get_balance_checked_at");
 
+export const getBalanceHistory = (
+  filter: BalanceHistoryFilter = {}
+): Promise<BalanceSnapshotPoint[]> =>
+  invoke("get_balance_history", { filter });
+
 export const getRecordCountTotal = (): Promise<number> =>
   invoke("get_record_count_total");
+
+export const getAppVersion = (): Promise<string> => invoke("get_app_version");
+
+export const checkForUpdates = (): Promise<UpdateCheckResult> =>
+  invoke("check_for_updates");

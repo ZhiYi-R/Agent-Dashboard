@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
+  checkForUpdates,
   countRecords,
   getAgents,
+  getAppVersion,
   getPrices,
   getRecords,
   getSettings,
@@ -19,9 +21,11 @@ import type {
   AppSettings,
   ModelSummary,
   RecordFilter,
+  UpdateCheckResult,
   UsageRecord,
   UsageSummary,
 } from "@/types";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,9 +39,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { ModelOverridesEditor } from "@/components/model-overrides";
 import { BalanceTab } from "@/components/balance-tab";
+import { FilterBar } from "@/components/filter-bar";
 import { TitleBar } from "@/components/title-bar";
 import { VirtualTableBody } from "@/components/virtual-table-body";
-import { Pencil, Save, X } from "lucide-react";
+import { fillDayGaps } from "@/lib/date-range";
+import { ExternalLink, Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useI18n, useT, type Locale } from "@/i18n";
 
 import {
@@ -99,6 +105,12 @@ export default function App() {
   const [balanceAutoToken, setBalanceAutoToken] = useState(0);
   const [settingsEditing, setSettingsEditing] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<AppSettings | null>(null);
+  const [appVersion, setAppVersion] = useState<string>("");
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(
+    null
+  );
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const latestRefreshRef = useRef<() => void>(() => {});
   const handleScanRef = useRef<(full?: boolean) => void>(() => {});
   const scanningRef = useRef(false);
@@ -112,8 +124,13 @@ export default function App() {
   const load = async () => {
     setLoading(true);
     try {
-      const [a, s] = await Promise.all([getAgents(), getSettings()]);
+      const [a, s, ver] = await Promise.all([
+        getAgents(),
+        getSettings(),
+        getAppVersion().catch(() => ""),
+      ]);
       setAgents(a);
+      setAppVersion(ver);
       setSettings({
         ...s,
         balanceProviders: s.balanceProviders ?? [],
@@ -126,6 +143,20 @@ export default function App() {
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCheckUpdates = async () => {
+    setUpdateChecking(true);
+    setUpdateError(null);
+    try {
+      const res = await checkForUpdates();
+      setUpdateResult(res);
+      if (res.currentVersion) setAppVersion(res.currentVersion);
+    } catch (e) {
+      setUpdateError(String(e));
+    } finally {
+      setUpdateChecking(false);
     }
   };
 
@@ -288,21 +319,26 @@ export default function App() {
     };
   }, []);
 
+  // Debounce filter-driven summary/records refresh to avoid hammering SQLite.
   useEffect(() => {
     if (!settings) return;
     if (scanningRef.current) return;
     setOffset(0);
-    void refreshData(0, filter);
-    void Promise.all([
-      listFilterModels(filter),
-      listFilterProjects(filter),
-    ])
-      .then(([ms, ps]) => {
-        if (scanningRef.current) return;
-        setFilterModels(ms);
-        setFilterProjects(ps);
-      })
-      .catch(console.error);
+    const handle = window.setTimeout(() => {
+      if (scanningRef.current) return;
+      void refreshData(0, filter);
+      void Promise.all([
+        listFilterModels(filter),
+        listFilterProjects(filter),
+      ])
+        .then(([ms, ps]) => {
+          if (scanningRef.current) return;
+          setFilterModels(ms);
+          setFilterProjects(ps);
+        })
+        .catch(console.error);
+    }, 180);
+    return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, settings]);
 
@@ -372,8 +408,8 @@ export default function App() {
 
   const chartData = useMemo(() => {
     if (!summary) return [];
-    return Object.values(summary.byDay).sort((a, b) => a.day.localeCompare(b.day));
-  }, [summary]);
+    return fillDayGaps(summary.byDay, filter.from, filter.to);
+  }, [summary, filter.from, filter.to]);
 
   // Token total for ranking. OpenAI/Codex: input already includes cache_read;
   // Anthropic-style: input is fresh-only and cache is additive.
@@ -537,6 +573,13 @@ export default function App() {
               value="overview"
               className="mt-0 flex min-h-0 flex-1 flex-col gap-3 data-[state=inactive]:hidden"
             >
+              <FilterBar
+                filter={filter}
+                onChange={setFilter}
+                agents={agents}
+                models={filterModels}
+                projects={filterProjects}
+              />
               <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                 {(
                   [
@@ -776,132 +819,40 @@ export default function App() {
             value="records"
             className="mt-0 flex h-full min-h-0 flex-1 flex-col gap-2 data-[state=inactive]:hidden"
           >
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <select
-                className="rounded-md border bg-background px-2 py-1.5 text-xs"
-                value={filter.agents?.[0] ?? ""}
-                onChange={(e) =>
-                  setFilter((f) => ({
-                    ...f,
-                    agents: e.target.value ? [e.target.value] : undefined,
-                  }))
-                }
-              >
-                <option value="">{t("records.allAgents")}</option>
-                {agents.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                className="rounded-md border bg-background px-2 py-1.5 text-xs"
-                value={filter.models?.[0] ?? ""}
-                onChange={(e) =>
-                  setFilter((f) => ({
-                    ...f,
-                    models: e.target.value ? [e.target.value] : undefined,
-                  }))
-                }
-              >
-                <option value="">{t("records.allModels")}</option>
-                {filterModels.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-
-              <Input
-                type="date"
-                className="h-8 w-36 text-xs"
-                value={filter.from ? filter.from.slice(0, 10) : ""}
-                onChange={(e) =>
-                  setFilter((f) => ({
-                    ...f,
-                    from: e.target.value
-                      ? new Date(`${e.target.value}T00:00:00.000Z`).toISOString()
-                      : undefined,
-                  }))
-                }
-              />
-              <Input
-                type="date"
-                className="h-8 w-36 text-xs"
-                value={filter.to ? filter.to.slice(0, 10) : ""}
-                onChange={(e) =>
-                  setFilter((f) => ({
-                    ...f,
-                    to: e.target.value
-                      ? new Date(`${e.target.value}T23:59:59.999Z`).toISOString()
-                      : undefined,
-                  }))
-                }
-              />
-
-              <select
-                className="rounded-md border bg-background px-2 py-1.5 text-xs"
-                value={filter.project ?? ""}
-                onChange={(e) =>
-                  setFilter((f) => ({
-                    ...f,
-                    project: e.target.value ? e.target.value : undefined,
-                  }))
-                }
-              >
-                <option value="">{t("records.allProjects")}</option>
-                {filterProjects.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-
+            <FilterBar
+              filter={filter}
+              onChange={setFilter}
+              agents={agents}
+              models={filterModels}
+              projects={filterProjects}
+            />
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+              <span>
+                {t("records.rangeOf", {
+                  from: formatNumber(recordCount === 0 ? 0 : offset + 1),
+                  to: formatNumber(Math.min(offset + PAGE_SIZE, recordCount)),
+                  total: formatNumber(recordCount),
+                })}
+              </span>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                onClick={() =>
-                  setFilter({
-                    agents: undefined,
-                    models: undefined,
-                    from: undefined,
-                    to: undefined,
-                    project: undefined,
-                  })
-                }
+                disabled={offset === 0}
+                onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
               >
-                {t("actions.reset")}
+                {t("actions.prev")}
               </Button>
-
-              <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-                <span>
-                  {t("records.rangeOf", {
-                    from: formatNumber(offset + 1),
-                    to: formatNumber(Math.min(offset + PAGE_SIZE, recordCount)),
-                    total: formatNumber(recordCount),
-                  })}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={offset === 0}
-                  onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-                >
-                  {t("actions.prev")}
-                </Button>
-                <span className="font-medium">
-                  {currentPage} / {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={offset + PAGE_SIZE >= recordCount}
-                  onClick={() => setOffset((o) => o + PAGE_SIZE)}
-                >
-                  {t("actions.next")}
-                </Button>
-              </div>
+              <span className="font-medium">
+                {currentPage} / {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={offset + PAGE_SIZE >= recordCount}
+                onClick={() => setOffset((o) => o + PAGE_SIZE)}
+              >
+                {t("actions.next")}
+              </Button>
             </div>
 
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -929,7 +880,7 @@ export default function App() {
                             colSpan={8}
                             className="h-24 text-center text-muted-foreground"
                           >
-                            —
+                            {t("records.empty")}
                           </TableCell>
                         </TableRow>
                       }
@@ -1200,6 +1151,101 @@ export default function App() {
                     <option value="zh-CN">{t("settings.langZh")}</option>
                     <option value="en">{t("settings.langEn")}</option>
                   </select>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 py-2">
+                  <CardTitle className="text-sm">{t("settings.about")}</CardTitle>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={updateChecking}
+                    onClick={() => void handleCheckUpdates()}
+                  >
+                    <RefreshCw
+                      className={`mr-1 h-3.5 w-3.5 ${
+                        updateChecking ? "animate-spin" : ""
+                      }`}
+                    />
+                    {updateChecking
+                      ? t("settings.checkingUpdate")
+                      : t("settings.checkUpdate")}
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    <span className="text-muted-foreground">
+                      {t("settings.version")}
+                    </span>
+                    <span className="font-mono tabular-nums">
+                      {appVersion || "—"}
+                    </span>
+                    {updateResult?.latestVersion && (
+                      <>
+                        <span className="text-muted-foreground">
+                          {t("settings.latestVersion")}
+                        </span>
+                        <span className="font-mono tabular-nums">
+                          {updateResult.latestVersion}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  {updateError && (
+                    <p className="text-xs text-destructive">{updateError}</p>
+                  )}
+                  {updateResult && !updateError && (
+                    <p
+                      className={`text-xs ${
+                        updateResult.updateAvailable
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {updateResult.updateAvailable
+                        ? t("settings.updateAvailable", {
+                            version:
+                              updateResult.latestVersion ??
+                              updateResult.message,
+                          })
+                        : updateResult.latestVersion
+                          ? t("settings.upToDate")
+                          : t("settings.noRelease")}
+                    </p>
+                  )}
+                  {updateResult?.notes && (
+                    <pre className="max-h-28 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-2 text-[11px] text-muted-foreground">
+                      {updateResult.notes.slice(0, 1200)}
+                    </pre>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {updateResult?.releaseUrl && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        onClick={() =>
+                          void openUrl(updateResult.releaseUrl as string)
+                        }
+                      >
+                        <ExternalLink className="mr-1 h-3 w-3" />
+                        {t("settings.openRelease")}
+                      </Button>
+                    )}
+                    {updateResult?.downloadUrl && (
+                      <Button
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() =>
+                          void openUrl(updateResult.downloadUrl as string)
+                        }
+                      >
+                        <ExternalLink className="mr-1 h-3 w-3" />
+                        {t("settings.openDownload")}
+                      </Button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
 

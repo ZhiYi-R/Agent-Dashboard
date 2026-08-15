@@ -45,6 +45,17 @@ export type MessageTree = {
     time: string;
     reason: string;
     unknown: string;
+    empty: string;
+  };
+  filter: {
+    today: string;
+    last7d: string;
+    last30d: string;
+    thisMonth: string;
+    allTime: string;
+    custom: string;
+    active: string;
+    agentsSelected: string;
   };
   settings: {
     title: string;
@@ -65,6 +76,16 @@ export type MessageTree = {
     language: string;
     langZh: string;
     langEn: string;
+    about: string;
+    version: string;
+    checkUpdate: string;
+    checkingUpdate: string;
+    updateAvailable: string;
+    upToDate: string;
+    openRelease: string;
+    openDownload: string;
+    latestVersion: string;
+    noRelease: string;
   };
   theme: { label: string; light: string; dark: string; system: string };
   balance: {
@@ -97,6 +118,14 @@ export type MessageTree = {
     manageProvidersHint: string;
     addProvider: string;
     editProvider: string;
+    history: string;
+    historyEmpty: string;
+    range7d: string;
+    range30d: string;
+    range90d: string;
+    allKeys: string;
+    availableSeries: string;
+    quotaUsedSeries: string;
   };
   modelOverrides: {
     model: string;
@@ -168,6 +197,17 @@ const zhCN: MessageTree = {
     time: "时间",
     reason: "推理",
     unknown: "<unknown>",
+    empty: "当前筛选无记录",
+  },
+  filter: {
+    today: "今天",
+    last7d: "近 7 天",
+    last30d: "近 30 天",
+    thisMonth: "本月",
+    allTime: "全部",
+    custom: "自定义",
+    active: "筛选中 · {detail}",
+    agentsSelected: "{n} 个 Agent",
   },
   settings: {
     title: "设置",
@@ -188,6 +228,16 @@ const zhCN: MessageTree = {
     language: "语言",
     langZh: "简体中文",
     langEn: "English",
+    about: "关于与更新",
+    version: "当前版本",
+    checkUpdate: "检查更新",
+    checkingUpdate: "检查中…",
+    updateAvailable: "发现新版本 {version}",
+    upToDate: "已是最新版本",
+    openRelease: "打开发布页",
+    openDownload: "下载安装包",
+    latestVersion: "最新版本",
+    noRelease: "尚未发布 GitHub Release",
   },
   theme: {
     label: "主题",
@@ -225,6 +275,14 @@ const zhCN: MessageTree = {
     manageProvidersHint: "添加、编辑或删除余额供应商，保存后生效。",
     addProvider: "添加供应商",
     editProvider: "编辑供应商",
+    history: "配额与余额趋势",
+    historyEmpty: "暂无历史快照，请先刷新余额",
+    range7d: "近 7 天",
+    range30d: "近 30 天",
+    range90d: "近 90 天",
+    allKeys: "全部密钥",
+    availableSeries: "可用余额",
+    quotaUsedSeries: "配额已用 %",
   },
   modelOverrides: {
     model: "模型",
