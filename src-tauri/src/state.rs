@@ -13,6 +13,7 @@ pub struct AppState {
     pub price_cache: Arc<Mutex<PriceCache>>,
     pub settings: Arc<Mutex<AppSettings>>,
     pub scan_running: Arc<AtomicBool>,
+    pub balance_refresh: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -37,6 +38,7 @@ impl AppState {
             price_cache: Arc::new(Mutex::new(price_cache)),
             settings: Arc::new(Mutex::new(settings)),
             scan_running: Arc::new(AtomicBool::new(false)),
+            balance_refresh: Arc::new(Mutex::new(())),
         })
     }
 }

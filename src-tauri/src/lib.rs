@@ -457,6 +457,10 @@ fn get_prices(state: State<AppState>) -> PriceCache {
 
 #[tauri::command]
 fn check_balances(state: State<AppState>) -> Result<Vec<BalanceResult>, String> {
+    let _refresh_guard = state
+        .balance_refresh
+        .lock()
+        .map_err(|_| "balance refresh lock poisoned")?;
     let settings = state.settings.lock().unwrap().clone();
     let results = balance::check_all(&settings.balance_providers);
     if let Ok(db) = UsageDb::open(&state.db_path) {
@@ -470,17 +474,17 @@ fn check_balance_provider(
     state: State<AppState>,
     provider_id: String,
 ) -> Result<Vec<BalanceResult>, String> {
+    let _refresh_guard = state
+        .balance_refresh
+        .lock()
+        .map_err(|_| "balance refresh lock poisoned")?;
     let settings = state.settings.lock().unwrap().clone();
     let provider = settings
         .balance_providers
         .iter()
         .find(|p| p.id == provider_id)
         .ok_or_else(|| format!("provider not found: {}", provider_id))?;
-    let results: Vec<BalanceResult> = provider
-        .keys
-        .iter()
-        .map(|k| balance::check_one(provider, k))
-        .collect();
+    let results = balance::check_provider(provider);
     if let Ok(db) = UsageDb::open(&state.db_path) {
         let _ = db.insert_balance_snapshots(&results);
     }
@@ -542,6 +546,7 @@ fn maybe_refresh_balances_on_startup(app: &AppHandle, state: &AppState) {
         return;
     }
     let db_path = state.db_path.clone();
+    let balance_refresh = Arc::clone(&state.balance_refresh);
     let interval = std::time::Duration::from_secs(mins.saturating_mul(60).max(60));
     let app = app.clone();
     std::thread::spawn(move || {
@@ -558,6 +563,9 @@ fn maybe_refresh_balances_on_startup(app: &AppHandle, state: &AppState) {
         if !need {
             return;
         }
+        let Ok(_refresh_guard) = balance_refresh.lock() else {
+            return;
+        };
         let results = balance::check_all(&settings.balance_providers);
         let _ = db.insert_balance_snapshots(&results);
         let _ = app.emit("balance-refreshed", results);

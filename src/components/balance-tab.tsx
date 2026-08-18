@@ -695,6 +695,8 @@ export const BalanceTab = memo(function BalanceTab({
   const [historyLoading, setHistoryLoading] = useState(false);
   const checkingRef = useRef(false);
   const checkSequenceRef = useRef(0);
+  const historyRequestRef = useRef(0);
+  const pendingAutoRefreshRef = useRef(false);
 
   // Load latest snapshots from SQLite once.
   useEffect(() => {
@@ -710,16 +712,22 @@ export const BalanceTab = memo(function BalanceTab({
 
   // Background refresh finished (startup worker).
   useEffect(() => {
-    let un: (() => void) | undefined;
-      void listen<BalanceResult[]>("balance-refreshed", (ev) => {
-        if (checkingRef.current) return;
-        setResults(ev.payload);
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<BalanceResult[]>("balance-refreshed", (ev) => {
+      if (checkingRef.current) return;
+      setResults(ev.payload);
       setLastCheckedAt(new Date());
     }).then((f) => {
-      un = f;
+      if (disposed) {
+        f();
+      } else {
+        unlisten = f;
+      }
     });
     return () => {
-      un?.();
+      disposed = true;
+      unlisten?.();
     };
   }, []);
 
@@ -742,17 +750,20 @@ export const BalanceTab = memo(function BalanceTab({
   }, [savedProviders]);
 
   const summaryStats = useMemo(() => {
-    const ok = results.filter((r) => r.success).length;
-    const fail = results.filter((r) => !r.success).length;
+    const validIds = new Set(dashboardCards.map(({ provider, key }) => `${provider.id}::${key.id}`));
+    const visibleResults = results.filter((r) => validIds.has(`${r.providerId}::${r.keyId}`));
+    const ok = visibleResults.filter((r) => r.success).length;
+    const fail = visibleResults.filter((r) => !r.success).length;
     return {
       ok,
       fail,
       total: dashboardCards.length,
       providers: savedProviders.length,
     };
-  }, [results, dashboardCards.length, savedProviders.length]);
+  }, [results, dashboardCards, savedProviders.length]);
 
   const loadHistory = useCallback(async () => {
+    const requestId = ++historyRequestRef.current;
     if (savedProviders.length === 0) {
       setHistory([]);
       return;
@@ -773,11 +784,11 @@ export const BalanceTab = memo(function BalanceTab({
         keyId,
         limit: 2000,
       });
-      setHistory(rows);
+      if (requestId === historyRequestRef.current) setHistory(rows);
     } catch (e) {
-      setError(String(e));
+      if (requestId === historyRequestRef.current) setError(String(e));
     } finally {
-      setHistoryLoading(false);
+      if (requestId === historyRequestRef.current) setHistoryLoading(false);
     }
   }, [savedProviders.length, historyDays, historyKey]);
 
@@ -860,6 +871,11 @@ export const BalanceTab = memo(function BalanceTab({
   // When tab becomes active: if no rows yet, pull DB; if stale vs interval, recheck.
   useEffect(() => {
     if (!active || savedProviders.length === 0) return;
+    if (pendingAutoRefreshRef.current) {
+      pendingAutoRefreshRef.current = false;
+      void runCheckAll();
+      return;
+    }
     const mins = settings.balanceRefreshMinutes ?? 15;
     if (results.length === 0) {
       void getLatestBalances()
@@ -883,8 +899,12 @@ export const BalanceTab = memo(function BalanceTab({
 
   useEffect(() => {
     if (!autoRefreshToken) return;
+    if (!active) {
+      pendingAutoRefreshRef.current = true;
+      return;
+    }
     void runCheckAll();
-  }, [autoRefreshToken]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [autoRefreshToken, active, runCheckAll]);
 
   const handleSaveProviders = async (list: BalanceProvider[]) => {
     const next: AppSettings = {
@@ -893,6 +913,17 @@ export const BalanceTab = memo(function BalanceTab({
     };
     await saveSettings(next);
     onSettingsChange(next);
+    const validIds = new Set(
+      list.flatMap((p) => p.keys.map((k) => `${p.id}::${k.id}`))
+    );
+    setResults((prev) => prev.filter((r) => validIds.has(`${r.providerId}::${r.keyId}`)));
+    setHistoryKey((prev) => (prev && validIds.has(prev) ? prev : ""));
+    if (active) {
+      pendingAutoRefreshRef.current = false;
+      void runCheckAll();
+    } else {
+      pendingAutoRefreshRef.current = true;
+    }
   };
 
   const checkOneKey = async (providerId: string) => {

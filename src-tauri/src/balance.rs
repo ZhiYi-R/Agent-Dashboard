@@ -3,15 +3,62 @@ use crate::models::{
 };
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
+use std::sync::{mpsc, OnceLock};
+
+const MAX_CONCURRENCY: usize = 4;
+
+fn http_client() -> &'static reqwest::blocking::Client {
+    static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(20))
+            .build()
+            .expect("build balance HTTP client")
+    })
+}
+
+fn check_tasks(tasks: Vec<(&BalanceProvider, &BalanceKey)>) -> Vec<BalanceResult> {
+    if tasks.is_empty() {
+        return Vec::new();
+    }
+
+    let worker_count = MAX_CONCURRENCY.min(tasks.len());
+    let (tx, rx) = mpsc::channel();
+    std::thread::scope(|scope| {
+        for worker in 0..worker_count {
+            let tx = tx.clone();
+            let tasks_ref = &tasks;
+            scope.spawn(move || {
+                for (index, (provider, key)) in tasks_ref
+                    .iter()
+                    .enumerate()
+                    .skip(worker)
+                    .step_by(worker_count)
+                {
+                    let _ = tx.send((index, check_one(provider, key)));
+                }
+            });
+        }
+        drop(tx);
+        let mut results: Vec<Option<BalanceResult>> = (0..tasks.len()).map(|_| None).collect();
+        for (index, result) in rx {
+            results[index] = Some(result);
+        }
+        results.into_iter().flatten().collect()
+    })
+}
 
 pub fn check_all(providers: &[BalanceProvider]) -> Vec<BalanceResult> {
-    let mut out = Vec::new();
-    for p in providers {
-        for k in &p.keys {
-            out.push(check_one(p, k));
-        }
-    }
-    out
+    check_tasks(
+        providers
+            .iter()
+            .flat_map(|p| p.keys.iter().map(move |k| (p, k)))
+            .collect(),
+    )
+}
+
+pub fn check_provider(provider: &BalanceProvider) -> Vec<BalanceResult> {
+    check_tasks(provider.keys.iter().map(|k| (provider, k)).collect())
 }
 
 pub fn check_one(provider: &BalanceProvider, key: &BalanceKey) -> BalanceResult {
@@ -78,10 +125,7 @@ fn http_get_json_extra(
     bearer: &str,
     extra_headers: &[(&str, &str)],
 ) -> Result<(u16, Value)> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .build()
-        .context("build http client")?;
+    let client = http_client();
 
     let mut req = client
         .get(url)
@@ -752,5 +796,54 @@ fn truncate(s: &str, max: usize) -> String {
     } else {
         let t: String = s.chars().take(max).collect();
         format!("{}…", t)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider(keys: Vec<BalanceKey>) -> BalanceProvider {
+        BalanceProvider {
+            id: "provider".into(),
+            name: "Provider".into(),
+            provider_type: BalanceProviderType::Newapi,
+            base_url: Some("http://127.0.0.1:1".into()),
+            keys,
+        }
+    }
+
+    fn key(id: &str, value: &str) -> BalanceKey {
+        BalanceKey {
+            id: id.into(),
+            name: id.into(),
+            key: value.into(),
+            user_id: Some("1".into()),
+        }
+    }
+
+    #[test]
+    fn check_all_preserves_input_order_with_failures() {
+        let p = provider(vec![key("first", ""), key("second", "")]);
+        let results = check_all(&[p]);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].key_id, "first");
+        assert_eq!(results[1].key_id, "second");
+        assert!(results.iter().all(|r| !r.success));
+        assert!(results.iter().all(|r| r.message.contains("empty")));
+    }
+
+    #[test]
+    fn check_all_empty_is_empty() {
+        assert!(check_all(&[]).is_empty());
+    }
+
+    #[test]
+    fn numeric_helpers_accept_number_and_string() {
+        let value = serde_json::json!({"number": 12, "text": "3.5", "bad": "x"});
+        assert_eq!(num_f64(&value, &["number"]), Some(12.0));
+        assert_eq!(num_f64(&value, &["text"]), Some(3.5));
+        assert_eq!(num_f64(&value, &["bad"]), None);
+        assert_eq!(parse_money(Some(&serde_json::json!("4.25"))), Some(4.25));
     }
 }

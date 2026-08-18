@@ -446,24 +446,15 @@ export default function App() {
     }
     try {
       await startScan(full);
-      // Staged live updates while scanning:
-      // - every 1.5s: cheap COUNT so the UI is clearly alive
-      // - every 4th tick (~6s): full summary (records + by-agent/model/day)
-      // Why not 800ms full refresh? getSummary runs several full-table GROUP BYs
-      // while the scanner is writing; requests pile up and the main thread janks.
-      let tick = 0;
+      // Keep the scan view responsive with a cheap count only. The full
+      // dashboard refresh runs once from the scan-finished handler.
       liveRefreshTimerRef.current = window.setInterval(() => {
         if (!scanningRef.current) {
           stopLiveRefresh();
           return;
         }
-        tick += 1;
         const f = filterRef.current;
-        if (tick % 4 === 0) {
-          void refreshData(offsetRef.current, f, { allowDuringScan: true });
-        } else {
-          void refreshCountOnly(f);
-        }
+        void refreshCountOnly(f);
       }, 1500);
     } catch (e) {
       console.error(e);
